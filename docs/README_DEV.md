@@ -8,6 +8,12 @@
 pip install -e ".[dev]"
 ```
 
+### API 起動（FastAPI）
+```bash
+python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
+# 開発時は --reload を付けてもOK
+```
+
 ### テスト実行
 ```bash
 make test        # または pytest -v
@@ -23,6 +29,23 @@ make format      # black でコードフォーマット
 ```bash
 make clean       # __pycache__ と .pyc 削除
 ```
+
+---
+
+## 📈 評価（Evals）
+
+### 実行
+```bash
+python -m evals.run_eval        # または make eval
+```
+
+### 出力
+- レポート: evals/report.json
+- 計測: JSON遵守率・エラー率・平均latency_ms
+
+### ダミーケース
+- 10件（半分は schema 指定）
+- API は MockProvider を使用
 
 ---
 
@@ -125,6 +148,23 @@ pytest --cov=src tests/
 [eval] compare GPT-4 vs Claude performance
   - Benchmark on 100 samples
   - Results in evals/results/model_comparison_2026-01-25.json
+```
+
+---
+
+## 🔍 ログの見方（Observability）
+
+- ログファイル: `runs/logs/gateway.jsonl`（1行1JSON）
+- 主なフィールド:
+  - `timestamp`, `request_id`, `provider`, `model`
+  - `latency_ms`, `token_usage`（prompt/completion/total）
+  - `error_type`, `prompt_version`
+  - `messages_masked`（content_hash, content_length）
+- 注意: 個人情報（全文）は保存しない。マスク済みの長さ/ハッシュのみ。
+
+例: tail で閲覧（Windows PowerShell）
+```powershell
+Get-Content runs/logs/gateway.jsonl -Tail 20
 ```
 
 ---

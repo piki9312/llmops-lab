@@ -1,4 +1,4 @@
-.PHONY: test lint format clean help
+.PHONY: test lint format clean eval help
 
 test:
 	pytest -v
@@ -13,10 +13,14 @@ clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
 
+eval:
+	python -m evals.run_eval
+
 help:
 	@echo "LLMOps Lab - Available commands:"
 	@echo "  make test       Run pytest"
 	@echo "  make lint       Run pylint code checks"
 	@echo "  make format     Format code with black"
 	@echo "  make clean      Remove cache files"
+	@echo "  make eval       Run evaluation (writes evals/report.json)"
 	@echo "  make help       Show this message"

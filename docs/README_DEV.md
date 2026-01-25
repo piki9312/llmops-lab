@@ -32,6 +32,33 @@ make clean       # __pycache__ と .pyc 削除
 
 ---
 
+## 🔄 CI/CD
+
+### GitHub Actions
+- ワークフロー: `.github/workflows/ci.yml`
+- トリガー: push（main/dev/chore/feature/fix）、PR（main/dev）
+- マトリックス: Python 3.10, 3.11
+- 実行内容:
+  - テスト（pytest）
+  - 評価（evals/run_eval.py）
+  - コード品質チェック（pylint）
+  - ログファイル確認
+  - 評価レポートをArtifactとして保存（30日間）
+
+### ローカルでCI相当を実行
+```bash
+# テスト
+python -m pytest -v
+
+# 評価
+python -m evals.run_eval
+
+# Lint
+pylint src/ tests/ --fail-under=8.0
+```
+
+---
+
 ## 📈 評価（Evals）
 
 ### 実行

@@ -73,7 +73,27 @@ pylint src/ tests/ --fail-under=8.0
 
 ---
 
-## 📈 評価（Evals）
+## � ログ可視化
+
+### Streamlit Dashboard
+```bash
+streamlit run src/llmops/dashboard.py
+```
+
+ブラウザで http://localhost:8501 が自動的に開きます。
+
+### 表示内容
+- **メトリクス**: リクエスト総数、成功率、平均レイテンシ、トークン数、JSON成功率
+- **グラフ**: レイテンシ推移、トークン使用量、エラー分布
+- **テーブル**: 最近20件のリクエスト詳細
+
+### 前提条件
+- runs/logs/gateway.jsonl にログが存在すること
+- APIを実行してログを生成: `python test_api.py` または API起動後にリクエスト
+
+---
+
+## �📈 評価（Evals）
 
 ### 実行
 ```bash

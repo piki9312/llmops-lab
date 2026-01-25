@@ -14,6 +14,20 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
 # 開発時は --reload を付けてもOK
 ```
 
+#### プロバイダ選択
+- デフォルト: `mock`（テスト用、APIキー不要）
+- 本番: `openai`（OpenAI API統合、APIキー必須）
+
+**OpenAI使用時の設定**
+```bash
+# 環境変数でAPIキー設定
+export OPENAI_API_KEY="sk-..."
+
+# または configs/default.yaml を編集
+provider: openai
+model: gpt-4o-mini  # または gpt-4o, gpt-4-turbo など
+```
+
 ### テスト実行
 ```bash
 make test        # または pytest -v

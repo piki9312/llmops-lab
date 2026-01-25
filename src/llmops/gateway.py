@@ -20,7 +20,7 @@ import yaml
 from fastapi import FastAPI
 from pydantic import BaseModel, Field, ConfigDict
 
-from .llm_client import LLMClient, MockLLMProvider
+from .llm_client import LLMClient, MockLLMProvider, OpenAIProvider
 
 # ============================================================================
 # DATA MODELS
@@ -153,7 +153,15 @@ else:
     }
 
 # Initialize provider and client
-provider = MockLLMProvider(CONFIG["model"])
+if CONFIG["provider"] == "openai":
+    provider = OpenAIProvider(
+        model_name=CONFIG["model"],
+        api_key=CONFIG.get("api_key")  # Falls back to OPENAI_API_KEY env var
+    )
+else:
+    # Default to mock provider
+    provider = MockLLMProvider(CONFIG["model"])
+
 llm_client = LLMClient(
     provider=provider,
     timeout_seconds=CONFIG["timeout_seconds"],

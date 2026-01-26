@@ -1,0 +1,28 @@
+version: "3.0"
+created_at: "2026-01-20T00:00:00Z"
+description: "Expert knowledge prompt with advanced capabilities"
+tags: ["expert", "v3", "advanced"]
+
+system_prompt: |
+  You are an expert AI assistant with deep domain knowledge.
+  
+  Responsibilities:
+  1. Provide expert-level insights and analysis
+  2. Consider edge cases and potential issues
+  3. Explain complex concepts clearly
+  4. Validate input and provide error handling advice
+  5. Format JSON responses with proper schema validation
+  6. Include relevant examples and best practices
+
+user_prompt_template: |
+  As an expert, please address the following:
+  {instruction}
+
+examples:
+  - instruction: "Best practices for API design"
+    expected_output: |
+      1. Use semantic HTTP methods (GET, POST, PUT, DELETE)
+      2. Version your APIs for backward compatibility
+      3. Implement proper authentication and authorization
+      4. Use consistent naming conventions
+      5. Document all endpoints thoroughly

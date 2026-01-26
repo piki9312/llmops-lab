@@ -188,10 +188,28 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
     
     st.divider()
     
+    # Prompt version analysis
+    st.subheader("📝 Prompt Version Usage")
+    if "prompt_version_used" in df.columns:
+        version_counts = df["prompt_version_used"].value_counts()
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**Version Distribution:**")
+            st.bar_chart(version_counts)
+        with col2:
+            st.write("**Version Details:**")
+            for version, count in version_counts.items():
+                pct = (count / len(df)) * 100
+                st.write(f"- v{version}: {count} requests ({pct:.1f}%)")
+    else:
+        st.info("No prompt version data available")
+    
+    st.divider()
+    
     # Recent requests table
     st.subheader("📋 Recent Requests")
     display_cols = ["timestamp", "request_id", "provider", "model", 
-                    "latency_ms", "cost_usd", "error_type"]
+                    "prompt_version_used", "latency_ms", "cost_usd", "error_type"]
     available_cols = [col for col in display_cols if col in df.columns]
     
     if available_cols:

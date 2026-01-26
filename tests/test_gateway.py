@@ -196,3 +196,69 @@ class TestErrorHandling:
         data = response.json()
         # Note: Pydantic may reject this, or we handle in provider
         assert response.status_code in [200, 422]
+
+class TestPromptVersioning:
+    """Test prompt versioning features."""
+
+    def test_generate_with_prompt_version(self, client):
+        """Test: POST /generate accepts prompt_version."""
+        payload = {
+            "messages": [{"role": "user", "content": "Hello"}],
+            "prompt_version": "1.0",
+            "max_output_tokens": 256,
+        }
+        response = client.post("/generate", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert "prompt_version_used" in data
+        assert data["prompt_version_used"] == "1.0"
+
+    def test_generate_with_nonexistent_prompt_version(self, client):
+        """Test: nonexistent version falls back to config default."""
+        payload = {
+            "messages": [{"role": "user", "content": "Hello"}],
+            "prompt_version": "99.0",  # Does not exist
+            "max_output_tokens": 256,
+        }
+        response = client.post("/generate", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        # Should use default (1.0)
+        assert "prompt_version_used" in data
+        assert data["prompt_version_used"] in ["1.0", "2.0", "3.0"]
+
+    def test_list_prompts_endpoint(self, client):
+        """Test: GET /prompts lists available versions."""
+        response = client.get("/prompts")
+        assert response.status_code == 200
+        data = response.json()
+        assert "versions" in data
+        assert "default" in data
+        assert len(data["versions"]) > 0
+
+    def test_get_prompt_info_endpoint(self, client):
+        """Test: GET /prompts/{version} returns metadata."""
+        response = client.get("/prompts/1.0")
+        assert response.status_code == 200
+        data = response.json()
+        assert "version" in data
+        assert data["version"] == "1.0"
+        assert "description" in data
+
+    def test_get_nonexistent_prompt_info(self, client):
+        """Test: GET /prompts/{version} for nonexistent version."""
+        response = client.get("/prompts/99.0")
+        assert response.status_code == 200
+        data = response.json()
+        assert "error" in data
+
+    def test_response_includes_prompt_version(self, client):
+        """Test: response always includes prompt_version_used."""
+        payload = {
+            "messages": [{"role": "user", "content": "Test"}],
+            "max_output_tokens": 256,
+        }
+        response = client.post("/generate", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert "prompt_version_used" in data

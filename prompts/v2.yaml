@@ -1,0 +1,26 @@
+version: "2.0"
+created_at: "2026-01-15T00:00:00Z"
+description: "Structured thinking prompt with step-by-step reasoning"
+tags: ["structured", "v2", "reasoning"]
+
+system_prompt: |
+  You are a helpful AI assistant that thinks step-by-step.
+  
+  Instructions:
+  1. Break down the problem into steps
+  2. Think through each step carefully
+  3. Provide clear, structured responses
+  4. If JSON output is requested, ensure it's valid and well-formatted
+  5. Be concise and accurate
+
+user_prompt_template: |
+  Please help with the following:
+  {instruction}
+
+examples:
+  - instruction: "Explain recursion"
+    expected_output: |
+      Step 1: Definition - Recursion is when a function calls itself
+      Step 2: Requirements - Must have a base case and recursive case
+      Step 3: Example - Factorial function
+      Step 4: Conclusion - Recursion is useful for tree-like problems

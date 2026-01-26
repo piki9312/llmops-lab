@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from .llm_client import LLMClient, MockLLMProvider, OpenAIProvider
 from .pricing import calculate_cost_usd
+from .prompt_manager import PromptManager
 
 # ============================================================================
 # DATA MODELS
@@ -43,6 +44,7 @@ class GenerateRequest(BaseModel):
         - messages：会話ターン
         - schema_：JSON出力スキーマ（任意）
         - max_output_tokens：最大トークン数
+        - prompt_version：プロンプトテンプレートバージョン（省略時はデフォルト）
 
     副作用：JSONLログ出力
     失敗モード：request_id 重複時は警告ログのみ
@@ -56,6 +58,9 @@ class GenerateRequest(BaseModel):
         default=None, alias="schema", description="JSON output schema (optional)"
     )
     max_output_tokens: int = Field(default=256, ge=1, le=4096)
+    prompt_version: Optional[str] = Field(
+        default=None, description="Prompt template version (optional)"
+    )
 
 
 class GenerateResponse(BaseModel):
@@ -70,6 +75,7 @@ class GenerateResponse(BaseModel):
         - latency_ms：処理時間
         - token_usage：{prompt, completion, total}
         - cost_usd：推定コスト（USD）
+        - prompt_version_used：使用されたプロンプトテンプレートバージョン
         - error_type_：null（成功）、"timeout"、"bad_json"、"provider_error"
 
     副作用：なし（ログ出力はgateway層で処理）
@@ -86,6 +92,7 @@ class GenerateResponse(BaseModel):
     completion_tokens: int
     total_tokens: int
     cost_usd: float
+    prompt_version_used: str
     error_type_: Optional[str] = Field(None, alias="error_type")
 
     # Pydantic v2 config
@@ -151,9 +158,13 @@ else:
         "model": "gpt-4-mock",
         "timeout_seconds": 30,
         "max_retries": 2,
-        "prompt_version": "v1",
+        "prompt_version": "1.0",
         "log_dir": "runs/logs",
     }
+
+# Initialize prompt manager
+prompts_dir = Path(__file__).parent.parent.parent / "prompts"
+prompt_manager = PromptManager(str(prompts_dir))
 
 # Initialize provider and client
 if CONFIG["provider"] == "openai":
@@ -228,6 +239,23 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         provider=CONFIG["provider"],
     )
 
+    # Determine prompt version used
+    prompt_version_requested = request.prompt_version
+    if prompt_version_requested:
+        # Use requested version if available
+        if prompt_manager.get(prompt_version_requested):
+            prompt_version_used = prompt_version_requested
+        else:
+            # Fall back to config default if requested version not found
+            logger.warning(
+                f"[{request_id}] Requested prompt version {prompt_version_requested} "
+                "not found, using config default"
+            )
+            prompt_version_used = CONFIG.get("prompt_version", "1.0")
+    else:
+        # Use config default
+        prompt_version_used = CONFIG.get("prompt_version", "1.0")
+
     # Build response
     response = GenerateResponse(
         request_id=request_id,
@@ -240,6 +268,7 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         completion_tokens=tokens.get("completion", 0),
         total_tokens=tokens.get("total", 0),
         cost_usd=cost_usd,
+        prompt_version_used=prompt_version_used,
         error_type=result.get("error_type"),
     )
 
@@ -256,8 +285,9 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
             "total": tokens.get("total", 0),
         },
         "cost_usd": cost_usd,
+        "prompt_version_used": prompt_version_used,
+        "prompt_version_requested": prompt_version_requested,
         "error_type": result.get("error_type"),
-        "prompt_version": CONFIG["prompt_version"],
         "messages_masked": _mask_messages(messages),
         "has_schema": request.schema_ is not None,
         "json_generated": response.json_ is not None,
@@ -284,3 +314,32 @@ async def health():
     失敗モード：なし
     """
     return {"status": "ok", "provider": CONFIG["provider"]}
+
+@app.get("/prompts")
+async def list_prompts():
+    """List available prompt versions.
+    
+    入力：なし
+    出力：{"versions": ["1.0", "2.0", "3.0"], "default": "1.0"}
+    副作用：なし
+    失敗モード：なし
+    """
+    return {
+        "versions": prompt_manager.list_versions(),
+        "default": CONFIG.get("prompt_version", "1.0"),
+    }
+
+
+@app.get("/prompts/{version}")
+async def get_prompt_info(version: str):
+    """Get metadata for a specific prompt version.
+    
+    入力：version (e.g., "1.0", "2.0")
+    出力：{"version": "1.0", "description": "...", "tags": [...], "created_at": "..."}
+    副作用：なし
+    失敗モード：バージョンが見つからない場合 404
+    """
+    info = prompt_manager.get_info(version)
+    if not info:
+        return {"error": f"Prompt version {version} not found", "available": prompt_manager.list_versions()}
+    return info

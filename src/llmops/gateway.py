@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field, ConfigDict
 
 from .llm_client import LLMClient, MockLLMProvider, OpenAIProvider
+from .pricing import calculate_cost_usd
 
 # ============================================================================
 # DATA MODELS
@@ -68,6 +69,7 @@ class GenerateResponse(BaseModel):
         - model：使用モデル
         - latency_ms：処理時間
         - token_usage：{prompt, completion, total}
+        - cost_usd：推定コスト（USD）
         - error_type_：null（成功）、"timeout"、"bad_json"、"provider_error"
 
     副作用：なし（ログ出力はgateway層で処理）
@@ -83,6 +85,7 @@ class GenerateResponse(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    cost_usd: float
     error_type_: Optional[str] = Field(None, alias="error_type")
 
     # Pydantic v2 config
@@ -217,6 +220,14 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
     # Extract token usage
     tokens = result.get("tokens", {"prompt": 0, "completion": 0, "total": 0})
 
+    # Calculate cost
+    cost_usd = calculate_cost_usd(
+        model=CONFIG["model"],
+        prompt_tokens=tokens.get("prompt", 0),
+        completion_tokens=tokens.get("completion", 0),
+        provider=CONFIG["provider"],
+    )
+
     # Build response
     response = GenerateResponse(
         request_id=request_id,
@@ -228,6 +239,7 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         prompt_tokens=tokens.get("prompt", 0),
         completion_tokens=tokens.get("completion", 0),
         total_tokens=tokens.get("total", 0),
+        cost_usd=cost_usd,
         error_type=result.get("error_type"),
     )
 
@@ -243,6 +255,7 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
             "completion": tokens.get("completion", 0),
             "total": tokens.get("total", 0),
         },
+        "cost_usd": cost_usd,
         "error_type": result.get("error_type"),
         "prompt_version": CONFIG["prompt_version"],
         "messages_masked": _mask_messages(messages),

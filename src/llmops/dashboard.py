@@ -51,6 +51,8 @@ def compute_metrics(logs: List[Dict[str, Any]]) -> Dict[str, Any]:
             "avg_latency_ms": 0.0,
             "total_tokens": 0,
             "json_generation_rate": 0.0,
+            "total_cost_usd": 0.0,
+            "avg_cost_usd": 0.0,
         }
     
     total = len(logs)
@@ -59,6 +61,7 @@ def compute_metrics(logs: List[Dict[str, Any]]) -> Dict[str, Any]:
     tokens = [log.get("token_usage", {}).get("total", 0) for log in logs]
     json_generated = sum(1 for log in logs if log.get("json_generated", False))
     schema_requests = sum(1 for log in logs if log.get("has_schema", False))
+    costs = [log.get("cost_usd", 0.0) for log in logs]
     
     return {
         "total_requests": total,
@@ -67,6 +70,8 @@ def compute_metrics(logs: List[Dict[str, Any]]) -> Dict[str, Any]:
         "total_tokens": sum(tokens),
         "json_generation_rate": (json_generated / schema_requests * 100) 
                                 if schema_requests > 0 else 0,
+        "total_cost_usd": sum(costs),
+        "avg_cost_usd": sum(costs) / len(costs) if costs else 0.0,
     }
 
 
@@ -99,7 +104,7 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
     metrics = compute_metrics(logs)
     
     # Display metrics
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
         st.metric("Total Requests", metrics["total_requests"])
@@ -115,6 +120,9 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
     
     with col5:
         st.metric("JSON Success", f"{metrics['json_generation_rate']:.1f}%")
+    
+    with col6:
+        st.metric("Total Cost", f"${metrics['total_cost_usd']:.6f}")
     
     st.divider()
     
@@ -157,6 +165,19 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
     
     st.divider()
     
+    # Cost analysis
+    st.subheader("💰 Cost Analysis")
+    if "cost_usd" in df.columns:
+        cost_data = df[["timestamp", "cost_usd"]].copy()
+        cost_data["timestamp"] = pd.to_datetime(cost_data["timestamp"], format="ISO8601", utc=True)
+        cost_chart_df = cost_data.set_index("timestamp")
+        st.line_chart(cost_chart_df)
+        st.write(f"**Average Cost per Request:** ${metrics['avg_cost_usd']:.8f}")
+    else:
+        st.info("No cost data available")
+    
+    st.divider()
+    
     # Error breakdown
     st.subheader("⚠️ Error Breakdown")
     error_counts = df["error_type"].value_counts()
@@ -170,7 +191,7 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
     # Recent requests table
     st.subheader("📋 Recent Requests")
     display_cols = ["timestamp", "request_id", "provider", "model", 
-                    "latency_ms", "error_type"]
+                    "latency_ms", "cost_usd", "error_type"]
     available_cols = [col for col in display_cols if col in df.columns]
     
     if available_cols:

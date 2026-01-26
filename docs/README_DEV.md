@@ -14,6 +14,20 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
 # 開発時は --reload を付けてもOK
 ```
 
+#### プロバイダ選択
+- デフォルト: `mock`（テスト用、APIキー不要）
+- 本番: `openai`（OpenAI API統合、APIキー必須）
+
+**OpenAI使用時の設定**
+```bash
+# 環境変数でAPIキー設定
+export OPENAI_API_KEY="sk-..."
+
+# または configs/default.yaml を編集
+provider: openai
+model: gpt-4o-mini  # または gpt-4o, gpt-4-turbo など
+```
+
 ### テスト実行
 ```bash
 make test        # または pytest -v
@@ -32,7 +46,54 @@ make clean       # __pycache__ と .pyc 削除
 
 ---
 
-## 📈 評価（Evals）
+## 🔄 CI/CD
+
+### GitHub Actions
+- ワークフロー: `.github/workflows/ci.yml`
+- トリガー: push（main/dev/chore/feature/fix）、PR（main/dev）
+- マトリックス: Python 3.10, 3.11
+- 実行内容:
+  - テスト（pytest）
+  - 評価（evals/run_eval.py）
+  - コード品質チェック（pylint）
+  - ログファイル確認
+  - 評価レポートをArtifactとして保存（30日間）
+
+### ローカルでCI相当を実行
+```bash
+# テスト
+python -m pytest -v
+
+# 評価
+python -m evals.run_eval
+
+# Lint
+pylint src/ tests/ --fail-under=8.0
+```
+
+---
+
+## � ログ可視化
+
+### Streamlit Dashboard
+```bash
+streamlit run src/llmops/dashboard.py
+```
+
+ブラウザで http://localhost:8501 が自動的に開きます。
+
+### 表示内容
+- **メトリクス**: リクエスト総数、成功率、平均レイテンシ、トークン数、JSON成功率
+- **グラフ**: レイテンシ推移、トークン使用量、エラー分布
+- **テーブル**: 最近20件のリクエスト詳細
+
+### 前提条件
+- runs/logs/gateway.jsonl にログが存在すること
+- APIを実行してログを生成: `python test_api.py` または API起動後にリクエスト
+
+---
+
+## �📈 評価（Evals）
 
 ### 実行
 ```bash

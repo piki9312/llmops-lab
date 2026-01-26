@@ -123,7 +123,7 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
     
     # Add timestamp parsing
     if "timestamp" in df.columns:
-        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+        df["timestamp"] = pd.to_datetime(df["timestamp"], format="ISO8601", utc=True)
         df = df.sort_values("timestamp")
     
     # Latency chart
@@ -149,7 +149,7 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
             })
         token_df = pd.DataFrame(token_data)
         if not token_df.empty and "timestamp" in token_df.columns:
-            token_df["timestamp"] = pd.to_datetime(token_df["timestamp"], utc=True)
+            token_df["timestamp"] = pd.to_datetime(token_df["timestamp"], format="ISO8601", utc=True)
             token_chart_df = token_df.set_index("timestamp")[["prompt", "completion"]]
             st.area_chart(token_chart_df)
     else:

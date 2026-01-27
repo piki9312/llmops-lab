@@ -262,3 +262,44 @@ class TestPromptVersioning:
         assert response.status_code == 200
         data = response.json()
         assert "prompt_version_used" in data
+
+
+class TestCaching:
+    """Test in-memory caching behavior."""
+
+    def test_cache_hit_on_repeated_request(self, client):
+        payload = {
+            "messages": [{"role": "user", "content": "Hello cache"}],
+            "max_output_tokens": 128,
+        }
+
+        first = client.post("/generate", json=payload)
+        assert first.status_code == 200
+        first_data = first.json()
+        assert first_data.get("cache_hit") is False
+
+        second = client.post("/generate", json=payload)
+        assert second.status_code == 200
+        second_data = second.json()
+        assert second_data.get("cache_hit") is True
+
+    def test_error_responses_not_cached(self, client):
+        """Ensure bad_json responses are not cached."""
+        payload = {
+            "messages": [{"role": "user", "content": "Bad schema"}],
+            # This schema triggers bad_json in MockLLMProvider
+            "schema": {"properties": None},
+            "max_output_tokens": 64,
+        }
+
+        first = client.post("/generate", json=payload)
+        assert first.status_code == 200
+        first_data = first.json()
+        assert first_data.get("error_type") is not None
+        assert first_data.get("cache_hit") is False
+
+        second = client.post("/generate", json=payload)
+        assert second.status_code == 200
+        second_data = second.json()
+        # Should not be served from cache because error_type was set
+        assert second_data.get("cache_hit") is False

@@ -53,6 +53,9 @@ def compute_metrics(logs: List[Dict[str, Any]]) -> Dict[str, Any]:
             "json_generation_rate": 0.0,
             "total_cost_usd": 0.0,
             "avg_cost_usd": 0.0,
+            "cache_hit_rate": 0.0,
+            "cache_hits": 0,
+            "cache_misses": 0,
         }
     
     total = len(logs)
@@ -62,6 +65,8 @@ def compute_metrics(logs: List[Dict[str, Any]]) -> Dict[str, Any]:
     json_generated = sum(1 for log in logs if log.get("json_generated", False))
     schema_requests = sum(1 for log in logs if log.get("has_schema", False))
     costs = [log.get("cost_usd", 0.0) for log in logs]
+    cache_hits = sum(1 for log in logs if log.get("cache_hit") is True)
+    cache_misses = total - cache_hits
     
     return {
         "total_requests": total,
@@ -72,6 +77,9 @@ def compute_metrics(logs: List[Dict[str, Any]]) -> Dict[str, Any]:
                                 if schema_requests > 0 else 0,
         "total_cost_usd": sum(costs),
         "avg_cost_usd": sum(costs) / len(costs) if costs else 0.0,
+        "cache_hit_rate": (cache_hits / total * 100) if total > 0 else 0.0,
+        "cache_hits": cache_hits,
+        "cache_misses": cache_misses,
     }
 
 
@@ -104,7 +112,7 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
     metrics = compute_metrics(logs)
     
     # Display metrics
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
     
     with col1:
         st.metric("Total Requests", metrics["total_requests"])
@@ -123,6 +131,9 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
     
     with col6:
         st.metric("Total Cost", f"${metrics['total_cost_usd']:.6f}")
+
+    with col7:
+        st.metric("Cache Hit Rate", f"{metrics['cache_hit_rate']:.1f}%")
     
     st.divider()
     
@@ -187,6 +198,19 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
         st.success("✅ No errors!")
     
     st.divider()
+
+    # Cache analysis
+    st.subheader("🗄️ Cache Performance")
+    if "cache_hit" in df.columns:
+        cache_counts = df["cache_hit"].value_counts()
+        hits = cache_counts.get(True, 0)
+        misses = cache_counts.get(False, 0)
+        st.write(f"Hits: {hits}, Misses: {misses}")
+        st.bar_chart(cache_counts.rename(index={True: "hit", False: "miss"}))
+    else:
+        st.info("No cache data available")
+
+    st.divider()
     
     # Prompt version analysis
     st.subheader("📝 Prompt Version Usage")
@@ -209,7 +233,7 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
     # Recent requests table
     st.subheader("📋 Recent Requests")
     display_cols = ["timestamp", "request_id", "provider", "model", 
-                    "prompt_version_used", "latency_ms", "cost_usd", "error_type"]
+                    "prompt_version_used", "latency_ms", "cost_usd", "cache_hit", "error_type"]
     available_cols = [col for col in display_cols if col in df.columns]
     
     if available_cols:

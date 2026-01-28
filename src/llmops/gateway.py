@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field, ConfigDict
 
 from .cache import InMemoryCacheStore, compute_cache_key
+from .config import apply_env_overrides
 from .llm_client import LLMClient, MockLLMProvider, OpenAIProvider
 from .pricing import calculate_cost_usd
 from .prompt_manager import PromptManager
@@ -170,6 +171,11 @@ else:
         "prompt_version": "1.0",
         "log_dir": "runs/logs",
     }
+
+# Apply environment variable overrides
+CONFIG = apply_env_overrides(CONFIG)
+logger = logging.getLogger(__name__)
+logger.info(f"Config loaded: provider={CONFIG['provider']}, model={CONFIG['model']}")
 
 # Initialize prompt manager
 prompts_dir = Path(__file__).parent.parent.parent / "prompts"

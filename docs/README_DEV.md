@@ -28,6 +28,46 @@ provider: openai
 model: gpt-4o-mini  # または gpt-4o, gpt-4-turbo など
 ```
 
+### 環境変数による設定上書き
+設定ファイル（`configs/default.yaml`）の値を環境変数で上書きできます。
+
+**サポートされる環境変数:**
+```bash
+# Provider設定
+export LLM_PROVIDER=openai           # プロバイダ（mock, openai）
+export LLM_MODEL=gpt-4o              # モデル名
+export LLM_TIMEOUT_SECONDS=60        # タイムアウト（秒）
+export LLM_MAX_RETRIES=3             # 最大リトライ回数
+
+# キャッシュ設定
+export CACHE_ENABLED=true            # キャッシュ有効化（true/false）
+export CACHE_TTL_SECONDS=1200        # キャッシュTTL（秒）
+export CACHE_MAX_ENTRIES=512         # 最大キャッシュエントリ数
+
+# レート制限
+export RATE_LIMIT_QPS=10             # クエリ/秒制限
+export RATE_LIMIT_TPM=50000          # トークン/分制限
+
+# その他
+export PROMPT_VERSION=2.0            # デフォルトプロンプトバージョン
+export LOG_DIR=/var/log/llm          # ログディレクトリ
+```
+
+**使用例:**
+```bash
+# 本番環境でOpenAI + レート制限有効化
+export LLM_PROVIDER=openai
+export LLM_MODEL=gpt-4o-mini
+export OPENAI_API_KEY=sk-...
+export RATE_LIMIT_QPS=100
+export RATE_LIMIT_TPM=500000
+python -m uvicorn src.llmops.gateway:app --host 0.0.0.0 --port 8000
+
+# 開発環境でキャッシュ無効化
+export CACHE_ENABLED=false
+python -m uvicorn src.llmops.gateway:app --reload
+```
+
 ### テスト実行
 ```bash
 make test        # または pytest -v

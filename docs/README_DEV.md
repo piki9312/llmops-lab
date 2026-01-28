@@ -86,7 +86,90 @@ make clean       # __pycache__ と .pyc 削除
 
 ---
 
-## 🔄 CI/CD
+## � Docker デプロイメント
+
+### クイックスタート
+```bash
+# ビルド＆起動（バックグラウンド）
+make docker-build
+make docker-up
+
+# または
+docker-compose up -d --build
+```
+
+**アクセス:**
+- API: http://localhost:8000
+- ダッシュボード: http://localhost:8501
+- ヘルスチェック: http://localhost:8000/health
+
+### 環境変数設定
+`.env` ファイルを作成して設定をカスタマイズ:
+
+```bash
+# .env
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-...
+RATE_LIMIT_QPS=100
+RATE_LIMIT_TPM=500000
+CACHE_ENABLED=true
+```
+
+その後、起動:
+```bash
+docker-compose up -d
+```
+
+### Docker コマンド
+```bash
+# ビルド
+make docker-build
+
+# 起動（バックグラウンド）
+make docker-up
+
+# 停止
+make docker-down
+
+# ログ表示（リアルタイム）
+make docker-logs
+
+# 再起動
+make docker-restart
+
+# 全て停止して削除
+docker-compose down -v
+```
+
+### コンテナ構成
+- **llmops-api**: FastAPI Gateway (ポート 8000)
+  - マルチステージビルドで最適化
+  - ヘルスチェック付き
+  - ログを `runs/logs/` にマウント
+  
+- **llmops-dashboard**: Streamlit Dashboard (ポート 8501)
+  - APIのログを読み取り専用でマウント
+  - リアルタイムメトリクス表示
+
+### 本番環境デプロイ例
+```bash
+# OpenAI + レート制限有効
+export LLM_PROVIDER=openai
+export LLM_MODEL=gpt-4o-mini
+export OPENAI_API_KEY=sk-...
+export RATE_LIMIT_QPS=100
+export RATE_LIMIT_TPM=500000
+
+docker-compose up -d
+
+# ログ確認
+docker-compose logs -f api
+```
+
+---
+
+## �🔄 CI/CD
 
 ### GitHub Actions
 - ワークフロー: `.github/workflows/ci.yml`

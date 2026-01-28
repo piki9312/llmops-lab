@@ -1,0 +1,20 @@
+# Dashboard Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install --no-cache-dir streamlit pandas pyyaml
+
+# Copy application code
+COPY src/ ./src/
+COPY prompts/ ./prompts/
+
+# Create logs directory
+RUN mkdir -p runs/logs
+
+# Expose Streamlit port
+EXPOSE 8501
+
+# Run Streamlit
+CMD ["streamlit", "run", "src/llmops/dashboard.py", "--server.address", "0.0.0.0", "--server.port", "8501"]

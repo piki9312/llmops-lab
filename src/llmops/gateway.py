@@ -20,7 +20,12 @@ import yaml
 from fastapi import FastAPI
 from pydantic import BaseModel, Field, ConfigDict
 
+from .cache import InMemoryCacheStore, compute_cache_key
+from .config import apply_env_overrides
 from .llm_client import LLMClient, MockLLMProvider, OpenAIProvider
+from .pricing import calculate_cost_usd
+from .prompt_manager import PromptManager
+from .rate_limiter import RateLimiter
 
 # ============================================================================
 # DATA MODELS
@@ -42,6 +47,7 @@ class GenerateRequest(BaseModel):
         - messages：会話ターン
         - schema_：JSON出力スキーマ（任意）
         - max_output_tokens：最大トークン数
+        - prompt_version：プロンプトテンプレートバージョン（省略時はデフォルト）
 
     副作用：JSONLログ出力
     失敗モード：request_id 重複時は警告ログのみ
@@ -55,6 +61,9 @@ class GenerateRequest(BaseModel):
         default=None, alias="schema", description="JSON output schema (optional)"
     )
     max_output_tokens: int = Field(default=256, ge=1, le=4096)
+    prompt_version: Optional[str] = Field(
+        default=None, description="Prompt template version (optional)"
+    )
 
 
 class GenerateResponse(BaseModel):
@@ -68,6 +77,9 @@ class GenerateResponse(BaseModel):
         - model：使用モデル
         - latency_ms：処理時間
         - token_usage：{prompt, completion, total}
+        - cost_usd：推定コスト（USD）
+        - prompt_version_used：使用されたプロンプトテンプレートバージョン
+        - cache_hit：キャッシュヒットフラグ
         - error_type_：null（成功）、"timeout"、"bad_json"、"provider_error"
 
     副作用：なし（ログ出力はgateway層で処理）
@@ -83,6 +95,11 @@ class GenerateResponse(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    cost_usd: float
+    prompt_version_used: str
+    cache_hit: bool = False
+    rate_limited: bool = False
+    rate_limit_reason: Optional[str] = None
     error_type_: Optional[str] = Field(None, alias="error_type")
 
     # Pydantic v2 config
@@ -148,9 +165,35 @@ else:
         "model": "gpt-4-mock",
         "timeout_seconds": 30,
         "max_retries": 2,
-        "prompt_version": "v1",
+        "cache_enabled": True,
+        "cache_ttl_seconds": 600,
+        "cache_max_entries": 256,
+        "prompt_version": "1.0",
         "log_dir": "runs/logs",
     }
+
+# Apply environment variable overrides
+CONFIG = apply_env_overrides(CONFIG)
+logger = logging.getLogger(__name__)
+logger.info(f"Config loaded: provider={CONFIG['provider']}, model={CONFIG['model']}")
+
+# Initialize prompt manager
+prompts_dir = Path(__file__).parent.parent.parent / "prompts"
+prompt_manager = PromptManager(str(prompts_dir))
+
+# Cache (in-memory)
+CACHE_ENABLED = CONFIG.get("cache_enabled", True)
+CACHE_TTL_SECONDS = CONFIG.get("cache_ttl_seconds", 600)
+CACHE_MAX_ENTRIES = CONFIG.get("cache_max_entries", 256)
+cache_store = InMemoryCacheStore(
+    max_entries=CACHE_MAX_ENTRIES,
+    ttl_seconds=CACHE_TTL_SECONDS,
+)
+
+# Rate limiter
+MAX_QPS = CONFIG.get("rate_limit_qps")  # None = no limit
+MAX_TPM = CONFIG.get("rate_limit_tpm")  # None = no limit
+rate_limiter = RateLimiter(max_qps=MAX_QPS, max_tpm=MAX_TPM) if (MAX_QPS or MAX_TPM) else None
 
 # Initialize provider and client
 if CONFIG["provider"] == "openai":
@@ -204,18 +247,112 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
     # Convert request to provider format
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
-    # Call LLM client
-    result = await llm_client.generate(
-        messages=messages,
-        schema=request.schema_,
-        max_tokens=request.max_output_tokens,
-    )
+    # Rate limiting check
+    rate_limited = False
+    rate_limit_reason = None
+    if rate_limiter:
+        # Estimate tokens: rough estimate based on message length
+        estimated_tokens = sum(len(m["content"]) // 4 for m in messages) + request.max_output_tokens
+        allowed, reason = await rate_limiter.check_rate_limit(estimated_tokens)
+        if not allowed:
+            rate_limited = True
+            rate_limit_reason = reason
+            logger.warning(f"[{request_id}] Rate limited: {reason}")
 
-    # Calculate latency
-    latency_ms = (time.time() - start_time) * 1000
+    # Determine prompt version used (before cache key)
+    prompt_version_requested = request.prompt_version
+    if prompt_version_requested:
+        if prompt_manager.get(prompt_version_requested):
+            prompt_version_used = prompt_version_requested
+        else:
+            logger.warning(
+                f"[{request_id}] Requested prompt version {prompt_version_requested} "
+                "not found, using config default"
+            )
+            prompt_version_used = CONFIG.get("prompt_version", "1.0")
+    else:
+        prompt_version_used = CONFIG.get("prompt_version", "1.0")
+
+    # Prepare cache key (hashed content, schema hash to avoid PII)
+    cache_hit = False
+    cached_entry = None
+    cache_key = None
+    hashed_messages = _mask_messages(messages)
+    schema_hash = None
+    if request.schema_ is not None:
+        try:
+            schema_hash = hashlib.sha256(
+                json.dumps(request.schema_, sort_keys=True, default=str).encode()
+            ).hexdigest()
+        except Exception:
+            schema_hash = None
+
+    if CACHE_ENABLED:
+        cache_payload = {
+            "messages": hashed_messages,
+            "schema_hash": schema_hash,
+            "model": CONFIG["model"],
+            "provider": CONFIG["provider"],
+            "prompt_version": prompt_version_used,
+            "max_output_tokens": request.max_output_tokens,
+        }
+        cache_key = compute_cache_key(cache_payload)
+        cached_entry = cache_store.get(cache_key)
+        if cached_entry:
+            cache_hit = True
+
+    # Call LLM client (or return cached, or rate limited)
+    if rate_limited:
+        result = {
+            "text": f"Rate limit exceeded: {rate_limit_reason}",
+            "json": None,
+            "tokens": {"prompt": 0, "completion": 0, "total": 0},
+            "error_type": "rate_limit",
+        }
+        latency_ms = (time.time() - start_time) * 1000
+    elif cache_hit and cached_entry:
+        result = {
+            "text": cached_entry.get("text", ""),
+            "json": cached_entry.get("json"),
+            "tokens": cached_entry.get("tokens", {"prompt": 0, "completion": 0, "total": 0}),
+            "error_type": cached_entry.get("error_type"),
+        }
+        latency_ms = cached_entry.get("latency_ms", 0.0)
+    else:
+        result = await llm_client.generate(
+            messages=messages,
+            schema=request.schema_,
+            max_tokens=request.max_output_tokens,
+        )
+
+        # Calculate latency
+        latency_ms = (time.time() - start_time) * 1000
 
     # Extract token usage
     tokens = result.get("tokens", {"prompt": 0, "completion": 0, "total": 0})
+
+    # Calculate cost
+    cost_usd = calculate_cost_usd(
+        model=CONFIG["model"],
+        prompt_tokens=tokens.get("prompt", 0),
+        completion_tokens=tokens.get("completion", 0),
+        provider=CONFIG["provider"],
+    )
+
+    # Store in cache if success and cache enabled
+    if CACHE_ENABLED and not cache_hit and result.get("error_type") is None and cache_key:
+        cache_store.set(
+            cache_key,
+            {
+                "text": result.get("text", ""),
+                "json": result.get("json"),
+                "tokens": tokens,
+                "error_type": result.get("error_type"),
+                "latency_ms": latency_ms,
+                "cached_at": datetime.now(timezone.utc).isoformat(),
+                "prompt_version_used": prompt_version_used,
+            },
+        )
 
     # Build response
     response = GenerateResponse(
@@ -228,6 +365,11 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         prompt_tokens=tokens.get("prompt", 0),
         completion_tokens=tokens.get("completion", 0),
         total_tokens=tokens.get("total", 0),
+        cost_usd=cost_usd,
+        prompt_version_used=prompt_version_used,
+        cache_hit=cache_hit,
+        rate_limited=rate_limited,
+        rate_limit_reason=rate_limit_reason,
         error_type=result.get("error_type"),
     )
 
@@ -243,9 +385,14 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
             "completion": tokens.get("completion", 0),
             "total": tokens.get("total", 0),
         },
+        "cost_usd": cost_usd,
+        "prompt_version_used": prompt_version_used,
+        "prompt_version_requested": prompt_version_requested,
+        "cache_hit": cache_hit,
+        "rate_limited": rate_limited,
+        "rate_limit_reason": rate_limit_reason,
         "error_type": result.get("error_type"),
-        "prompt_version": CONFIG["prompt_version"],
-        "messages_masked": _mask_messages(messages),
+        "messages_masked": hashed_messages,
         "has_schema": request.schema_ is not None,
         "json_generated": response.json_ is not None,
     }
@@ -271,3 +418,32 @@ async def health():
     失敗モード：なし
     """
     return {"status": "ok", "provider": CONFIG["provider"]}
+
+@app.get("/prompts")
+async def list_prompts():
+    """List available prompt versions.
+    
+    入力：なし
+    出力：{"versions": ["1.0", "2.0", "3.0"], "default": "1.0"}
+    副作用：なし
+    失敗モード：なし
+    """
+    return {
+        "versions": prompt_manager.list_versions(),
+        "default": CONFIG.get("prompt_version", "1.0"),
+    }
+
+
+@app.get("/prompts/{version}")
+async def get_prompt_info(version: str):
+    """Get metadata for a specific prompt version.
+    
+    入力：version (e.g., "1.0", "2.0")
+    出力：{"version": "1.0", "description": "...", "tags": [...], "created_at": "..."}
+    副作用：なし
+    失敗モード：バージョンが見つからない場合 404
+    """
+    info = prompt_manager.get_info(version)
+    if not info:
+        return {"error": f"Prompt version {version} not found", "available": prompt_manager.list_versions()}
+    return info

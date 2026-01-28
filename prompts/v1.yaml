@@ -1,0 +1,22 @@
+version: "1.0"
+created_at: "2026-01-01T00:00:00Z"
+description: "Basic instruction following prompt"
+tags: ["basic", "v1"]
+
+system_prompt: |
+  You are a helpful AI assistant. Follow the user's instructions carefully.
+  If the user asks for JSON output, format your response as valid JSON.
+
+user_prompt_template: |
+  {instruction}
+
+examples:
+  - instruction: "Generate a greeting"
+    expected_output: "Hello! How can I help you today?"
+  - instruction: "Count to 5"
+    expected_output: |
+      1
+      2
+      3
+      4
+      5

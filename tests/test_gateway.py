@@ -196,3 +196,129 @@ class TestErrorHandling:
         data = response.json()
         # Note: Pydantic may reject this, or we handle in provider
         assert response.status_code in [200, 422]
+
+class TestPromptVersioning:
+    """Test prompt versioning features."""
+
+    def test_generate_with_prompt_version(self, client):
+        """Test: POST /generate accepts prompt_version."""
+        payload = {
+            "messages": [{"role": "user", "content": "Hello"}],
+            "prompt_version": "1.0",
+            "max_output_tokens": 256,
+        }
+        response = client.post("/generate", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert "prompt_version_used" in data
+        assert data["prompt_version_used"] == "1.0"
+
+    def test_generate_with_nonexistent_prompt_version(self, client):
+        """Test: nonexistent version falls back to config default."""
+        payload = {
+            "messages": [{"role": "user", "content": "Hello"}],
+            "prompt_version": "99.0",  # Does not exist
+            "max_output_tokens": 256,
+        }
+        response = client.post("/generate", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        # Should use default (1.0)
+        assert "prompt_version_used" in data
+        assert data["prompt_version_used"] in ["1.0", "2.0", "3.0"]
+
+    def test_list_prompts_endpoint(self, client):
+        """Test: GET /prompts lists available versions."""
+        response = client.get("/prompts")
+        assert response.status_code == 200
+        data = response.json()
+        assert "versions" in data
+        assert "default" in data
+        assert len(data["versions"]) > 0
+
+    def test_get_prompt_info_endpoint(self, client):
+        """Test: GET /prompts/{version} returns metadata."""
+        response = client.get("/prompts/1.0")
+        assert response.status_code == 200
+        data = response.json()
+        assert "version" in data
+        assert data["version"] == "1.0"
+        assert "description" in data
+
+    def test_get_nonexistent_prompt_info(self, client):
+        """Test: GET /prompts/{version} for nonexistent version."""
+        response = client.get("/prompts/99.0")
+        assert response.status_code == 200
+        data = response.json()
+        assert "error" in data
+
+    def test_response_includes_prompt_version(self, client):
+        """Test: response always includes prompt_version_used."""
+        payload = {
+            "messages": [{"role": "user", "content": "Test"}],
+            "max_output_tokens": 256,
+        }
+        response = client.post("/generate", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert "prompt_version_used" in data
+
+
+class TestCaching:
+    """Test in-memory caching behavior."""
+
+    def test_cache_hit_on_repeated_request(self, client):
+        payload = {
+            "messages": [{"role": "user", "content": "Hello cache"}],
+            "max_output_tokens": 128,
+        }
+
+        first = client.post("/generate", json=payload)
+        assert first.status_code == 200
+        first_data = first.json()
+        assert first_data.get("cache_hit") is False
+
+        second = client.post("/generate", json=payload)
+        assert second.status_code == 200
+        second_data = second.json()
+        assert second_data.get("cache_hit") is True
+
+    def test_error_responses_not_cached(self, client):
+        """Ensure bad_json responses are not cached."""
+        payload = {
+            "messages": [{"role": "user", "content": "Bad schema"}],
+            # This schema triggers bad_json in MockLLMProvider
+            "schema": {"properties": None},
+            "max_output_tokens": 64,
+        }
+
+        first = client.post("/generate", json=payload)
+        assert first.status_code == 200
+        first_data = first.json()
+        assert first_data.get("error_type") is not None
+        assert first_data.get("cache_hit") is False
+
+        second = client.post("/generate", json=payload)
+        assert second.status_code == 200
+        second_data = second.json()
+        # Should not be served from cache because error_type was set
+        assert second_data.get("cache_hit") is False
+
+
+class TestRateLimiting:
+    """Test rate limiting functionality."""
+
+    def test_rate_limiting_disabled_by_default(self, client):
+        """Test that rate limiting is disabled by default (no limits in config)."""
+        payload = {
+            "messages": [{"role": "user", "content": "Test"}],
+            "max_output_tokens": 64,
+        }
+        
+        # Should allow many requests without rate limiting
+        for _ in range(20):
+            response = client.post("/generate", json=payload)
+            assert response.status_code == 200
+            data = response.json()
+            assert data.get("rate_limited") is False
+            assert data.get("rate_limit_reason") is None

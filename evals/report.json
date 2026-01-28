@@ -1,0 +1,10 @@
+{
+  "timestamp": "2026-01-26T02:43:09.641365+00:00",
+  "sample_size": 10,
+  "schema_cases": 5,
+  "json_ok": 5,
+  "json_adherence_rate": 1.0,
+  "error_count": 0,
+  "error_rate": 0.0,
+  "avg_latency_ms": 56.89585208892822
+}

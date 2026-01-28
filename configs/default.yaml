@@ -12,6 +12,15 @@ model: gpt-4-mock  # For openai: gpt-4o-mini, gpt-4o, gpt-4-turbo, etc.
 timeout_seconds: 30
 max_retries: 2
 
+# Cache settings
+cache_enabled: true
+cache_ttl_seconds: 600   # 10 minutes
+cache_max_entries: 256
+
+# Rate limiting (null = no limit)
+rate_limit_qps: null     # Max queries per second (e.g., 10)
+rate_limit_tpm: null     # Max tokens per minute (e.g., 10000)
+
 # Observability
-prompt_version: "v1"
+prompt_version: "1.0"
 log_dir: "runs/logs"

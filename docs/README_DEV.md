@@ -28,6 +28,46 @@ provider: openai
 model: gpt-4o-mini  # または gpt-4o, gpt-4-turbo など
 ```
 
+### 環境変数による設定上書き
+設定ファイル（`configs/default.yaml`）の値を環境変数で上書きできます。
+
+**サポートされる環境変数:**
+```bash
+# Provider設定
+export LLM_PROVIDER=openai           # プロバイダ（mock, openai）
+export LLM_MODEL=gpt-4o              # モデル名
+export LLM_TIMEOUT_SECONDS=60        # タイムアウト（秒）
+export LLM_MAX_RETRIES=3             # 最大リトライ回数
+
+# キャッシュ設定
+export CACHE_ENABLED=true            # キャッシュ有効化（true/false）
+export CACHE_TTL_SECONDS=1200        # キャッシュTTL（秒）
+export CACHE_MAX_ENTRIES=512         # 最大キャッシュエントリ数
+
+# レート制限
+export RATE_LIMIT_QPS=10             # クエリ/秒制限
+export RATE_LIMIT_TPM=50000          # トークン/分制限
+
+# その他
+export PROMPT_VERSION=2.0            # デフォルトプロンプトバージョン
+export LOG_DIR=/var/log/llm          # ログディレクトリ
+```
+
+**使用例:**
+```bash
+# 本番環境でOpenAI + レート制限有効化
+export LLM_PROVIDER=openai
+export LLM_MODEL=gpt-4o-mini
+export OPENAI_API_KEY=sk-...
+export RATE_LIMIT_QPS=100
+export RATE_LIMIT_TPM=500000
+python -m uvicorn src.llmops.gateway:app --host 0.0.0.0 --port 8000
+
+# 開発環境でキャッシュ無効化
+export CACHE_ENABLED=false
+python -m uvicorn src.llmops.gateway:app --reload
+```
+
 ### テスト実行
 ```bash
 make test        # または pytest -v
@@ -46,7 +86,90 @@ make clean       # __pycache__ と .pyc 削除
 
 ---
 
-## 🔄 CI/CD
+## � Docker デプロイメント
+
+### クイックスタート
+```bash
+# ビルド＆起動（バックグラウンド）
+make docker-build
+make docker-up
+
+# または
+docker-compose up -d --build
+```
+
+**アクセス:**
+- API: http://localhost:8000
+- ダッシュボード: http://localhost:8501
+- ヘルスチェック: http://localhost:8000/health
+
+### 環境変数設定
+`.env` ファイルを作成して設定をカスタマイズ:
+
+```bash
+# .env
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-...
+RATE_LIMIT_QPS=100
+RATE_LIMIT_TPM=500000
+CACHE_ENABLED=true
+```
+
+その後、起動:
+```bash
+docker-compose up -d
+```
+
+### Docker コマンド
+```bash
+# ビルド
+make docker-build
+
+# 起動（バックグラウンド）
+make docker-up
+
+# 停止
+make docker-down
+
+# ログ表示（リアルタイム）
+make docker-logs
+
+# 再起動
+make docker-restart
+
+# 全て停止して削除
+docker-compose down -v
+```
+
+### コンテナ構成
+- **llmops-api**: FastAPI Gateway (ポート 8000)
+  - マルチステージビルドで最適化
+  - ヘルスチェック付き
+  - ログを `runs/logs/` にマウント
+  
+- **llmops-dashboard**: Streamlit Dashboard (ポート 8501)
+  - APIのログを読み取り専用でマウント
+  - リアルタイムメトリクス表示
+
+### 本番環境デプロイ例
+```bash
+# OpenAI + レート制限有効
+export LLM_PROVIDER=openai
+export LLM_MODEL=gpt-4o-mini
+export OPENAI_API_KEY=sk-...
+export RATE_LIMIT_QPS=100
+export RATE_LIMIT_TPM=500000
+
+docker-compose up -d
+
+# ログ確認
+docker-compose logs -f api
+```
+
+---
+
+## �🔄 CI/CD
 
 ### GitHub Actions
 - ワークフロー: `.github/workflows/ci.yml`

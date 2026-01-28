@@ -303,3 +303,22 @@ class TestCaching:
         second_data = second.json()
         # Should not be served from cache because error_type was set
         assert second_data.get("cache_hit") is False
+
+
+class TestRateLimiting:
+    """Test rate limiting functionality."""
+
+    def test_rate_limiting_disabled_by_default(self, client):
+        """Test that rate limiting is disabled by default (no limits in config)."""
+        payload = {
+            "messages": [{"role": "user", "content": "Test"}],
+            "max_output_tokens": 64,
+        }
+        
+        # Should allow many requests without rate limiting
+        for _ in range(20):
+            response = client.post("/generate", json=payload)
+            assert response.status_code == 200
+            data = response.json()
+            assert data.get("rate_limited") is False
+            assert data.get("rate_limit_reason") is None

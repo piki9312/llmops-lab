@@ -56,6 +56,7 @@ def compute_metrics(logs: List[Dict[str, Any]]) -> Dict[str, Any]:
             "cache_hit_rate": 0.0,
             "cache_hits": 0,
             "cache_misses": 0,
+            "rate_limited_count": 0,
         }
     
     total = len(logs)
@@ -67,6 +68,7 @@ def compute_metrics(logs: List[Dict[str, Any]]) -> Dict[str, Any]:
     costs = [log.get("cost_usd", 0.0) for log in logs]
     cache_hits = sum(1 for log in logs if log.get("cache_hit") is True)
     cache_misses = total - cache_hits
+    rate_limited_count = sum(1 for log in logs if log.get("rate_limited") is True)
     
     return {
         "total_requests": total,
@@ -80,6 +82,7 @@ def compute_metrics(logs: List[Dict[str, Any]]) -> Dict[str, Any]:
         "cache_hit_rate": (cache_hits / total * 100) if total > 0 else 0.0,
         "cache_hits": cache_hits,
         "cache_misses": cache_misses,
+        "rate_limited_count": rate_limited_count,
     }
 
 
@@ -211,6 +214,36 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
         st.info("No cache data available")
 
     st.divider()
+
+    # Rate limiting analysis
+    st.subheader("⚡ Rate Limiting")
+    if "rate_limited" in df.columns:
+        rate_limited_total = metrics["rate_limited_count"]
+        rate_limit_pct = (rate_limited_total / metrics["total_requests"] * 100) if metrics["total_requests"] > 0 else 0
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Rate Limited Requests", rate_limited_total, 
+                     delta=f"{rate_limit_pct:.1f}% of total",
+                     delta_color="inverse")
+        
+        with col2:
+            # Breakdown by reason
+            rate_limited_logs = [log for log in logs if log.get("rate_limited") is True]
+            if rate_limited_logs:
+                reasons = {}
+                for log in rate_limited_logs:
+                    reason = log.get("rate_limit_reason", "unknown")
+                    reasons[reason] = reasons.get(reason, 0) + 1
+                st.write("**Rate Limit Reasons:**")
+                for reason, count in reasons.items():
+                    st.write(f"- {reason}: {count}")
+            else:
+                st.success("✅ No rate limiting occurred")
+    else:
+        st.info("No rate limiting data available")
+
+    st.divider()
     
     # Prompt version analysis
     st.subheader("📝 Prompt Version Usage")
@@ -233,7 +266,8 @@ python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
     # Recent requests table
     st.subheader("📋 Recent Requests")
     display_cols = ["timestamp", "request_id", "provider", "model", 
-                    "prompt_version_used", "latency_ms", "cost_usd", "cache_hit", "error_type"]
+                    "prompt_version_used", "latency_ms", "cost_usd", "cache_hit", 
+                    "rate_limited", "error_type"]
     available_cols = [col for col in display_cols if col in df.columns]
     
     if available_cols:

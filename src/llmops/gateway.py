@@ -24,6 +24,7 @@ from .cache import InMemoryCacheStore, compute_cache_key
 from .llm_client import LLMClient, MockLLMProvider, OpenAIProvider
 from .pricing import calculate_cost_usd
 from .prompt_manager import PromptManager
+from .rate_limiter import RateLimiter
 
 # ============================================================================
 # DATA MODELS
@@ -96,6 +97,8 @@ class GenerateResponse(BaseModel):
     cost_usd: float
     prompt_version_used: str
     cache_hit: bool = False
+    rate_limited: bool = False
+    rate_limit_reason: Optional[str] = None
     error_type_: Optional[str] = Field(None, alias="error_type")
 
     # Pydantic v2 config
@@ -181,6 +184,11 @@ cache_store = InMemoryCacheStore(
     ttl_seconds=CACHE_TTL_SECONDS,
 )
 
+# Rate limiter
+MAX_QPS = CONFIG.get("rate_limit_qps")  # None = no limit
+MAX_TPM = CONFIG.get("rate_limit_tpm")  # None = no limit
+rate_limiter = RateLimiter(max_qps=MAX_QPS, max_tpm=MAX_TPM) if (MAX_QPS or MAX_TPM) else None
+
 # Initialize provider and client
 if CONFIG["provider"] == "openai":
     provider = OpenAIProvider(
@@ -233,6 +241,18 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
     # Convert request to provider format
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
+    # Rate limiting check
+    rate_limited = False
+    rate_limit_reason = None
+    if rate_limiter:
+        # Estimate tokens: rough estimate based on message length
+        estimated_tokens = sum(len(m["content"]) // 4 for m in messages) + request.max_output_tokens
+        allowed, reason = await rate_limiter.check_rate_limit(estimated_tokens)
+        if not allowed:
+            rate_limited = True
+            rate_limit_reason = reason
+            logger.warning(f"[{request_id}] Rate limited: {reason}")
+
     # Determine prompt version used (before cache key)
     prompt_version_requested = request.prompt_version
     if prompt_version_requested:
@@ -275,8 +295,16 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         if cached_entry:
             cache_hit = True
 
-    # Call LLM client (or return cached)
-    if cache_hit and cached_entry:
+    # Call LLM client (or return cached, or rate limited)
+    if rate_limited:
+        result = {
+            "text": f"Rate limit exceeded: {rate_limit_reason}",
+            "json": None,
+            "tokens": {"prompt": 0, "completion": 0, "total": 0},
+            "error_type": "rate_limit",
+        }
+        latency_ms = (time.time() - start_time) * 1000
+    elif cache_hit and cached_entry:
         result = {
             "text": cached_entry.get("text", ""),
             "json": cached_entry.get("json"),
@@ -334,6 +362,8 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         cost_usd=cost_usd,
         prompt_version_used=prompt_version_used,
         cache_hit=cache_hit,
+        rate_limited=rate_limited,
+        rate_limit_reason=rate_limit_reason,
         error_type=result.get("error_type"),
     )
 
@@ -353,6 +383,8 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         "prompt_version_used": prompt_version_used,
         "prompt_version_requested": prompt_version_requested,
         "cache_hit": cache_hit,
+        "rate_limited": rate_limited,
+        "rate_limit_reason": rate_limit_reason,
         "error_type": result.get("error_type"),
         "messages_masked": hashed_messages,
         "has_schema": request.schema_ is not None,

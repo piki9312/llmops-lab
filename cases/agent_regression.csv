@@ -1,0 +1,11 @@
+case_id,name,input_prompt,expected_output,category,severity
+TC001,Basic Greeting,Hello! How are you today?,A polite greeting response,greeting,S2
+TC002,Information Query,What is the capital of France?,Paris,factual,S2
+TC003,Math Calculation,What is 15 multiplied by 8?,120,math,S2
+TC004,External API Call,Call weather API for Tokyo,"{""location"":""Tokyo"",""temperature"":15,""condition"":""cloudy"",""humidity"":60}",api,S1
+TC005,Payment Processing,Process payment of $100,"{""transaction_id"":""tx_123"",""amount"":100.00,""currency"":""USD"",""status"":""completed""}",api,S1
+TC006,User Authentication,Authenticate user with token xyz123,"{""user_id"":""usr_456"",""token"":""xyz123"",""authenticated"":true,""expires_at"":""2026-02-01T12:00:00Z""}",api,S1
+TC007,Database Write,Save user profile to database,"{""record_id"":""rec_789"",""table"":""users"",""operation"":""insert"",""success"":true}",api,S1
+TC008,External Service Integration,Fetch data from third-party service,"{""provider"":""external_api"",""data_retrieved"":true,""record_count"":25,""timestamp"":""2026-02-01T10:30:00Z""}",api,S1
+TC009,Cache Lookup,Get cached user preferences,Preferences returned,performance,S2
+TC010,Report Generation,Generate monthly summary report,Report generated,reporting,S2

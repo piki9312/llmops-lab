@@ -15,11 +15,6 @@ from .evaluator import Evaluator
 from .report_weekly import WeeklyReporter
 
 
-def dummy_agent(prompt: str) -> str:
-    """Placeholder agent function for testing."""
-    return f"Response to: {prompt}"
-
-
 def run_regression(
     cases_file: str,
     output_dir: Optional[str] = None,
@@ -47,7 +42,7 @@ def run_regression(
         # Run tests
         if verbose:
             print("Running regression tests...")
-        runner = RegressionRunner(dummy_agent)
+        runner = RegressionRunner(use_llmops=True)
         report = runner.run_all(cases)
         
         # Display results
@@ -57,8 +52,10 @@ def run_regression(
         print(f"Total Cases: {summary['total_cases']}")
         print(f"Passed: {summary['passed_cases']}")
         print(f"Failed: {summary['failed_cases']}")
-        print(f"Pass Rate: {summary['pass_rate']:.2f}%")
+        print(f"Pass Rate: {summary['pass_rate_percent']:.2f}%")
         print(f"Average Score: {summary['average_score']:.2f}")
+        print(f"Average Latency: {summary['avg_latency_ms']:.2f} ms")
+        print(f"Total Cost: ${summary['total_cost_usd']:.6f}")
         
         # Save report if output directory specified
         if output_dir:

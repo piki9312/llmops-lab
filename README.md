@@ -280,6 +280,38 @@ docker-compose down -v
 - [ ] ログローテーション
 - [ ] Human Feedback ループ
 - [ ] A/B テスト機能
+- [ ] Agent Regression の評価メトリクス拡張
+
+---
+
+## 🧪 Agent Regression (WIP)
+
+**Agent Regression Testing Framework** - エージェント出力の品質と一貫性を保証する自動テストフレームワーク
+
+### 概要
+- **テストケース管理**: CSV形式でテストケースを定義・管理
+- **自動実行**: CLI/プログラムからテスト実行
+- **評価・レポート**: パスレート、スコア、実行時間などのメトリクス
+- **週次レポート**: トレンド分析と改善提案
+
+### クイックスタート
+
+```bash
+# テストケースを作成
+# cases/agent_regression.csv を編集
+
+# テスト実行
+python -m agentops.cli cases/agent_regression.csv -v
+
+# レポート確認
+ls reports/agentreg/
+```
+
+### ドキュメント
+- [オンボーディングガイド](docs/agentreg_onboarding_onepager.md)
+- [週次レポートテンプレート](docs/agentreg_weekly_report_template.md)
+
+**ステータス**: 🚧 開発中（基本機能実装済み）
 
 ---
 

@@ -35,6 +35,7 @@ class TestResult:
     execution_time: float
     timestamp: datetime
     error: Optional[str] = None
+    failure_type: Optional[str] = None
     metrics: Optional[Dict[str, Any]] = None
     
     # llmops integration metrics

@@ -38,7 +38,10 @@ def load_from_csv(file_path: str) -> List[TestCase]:
                 name=row.get('name', ''),
                 input_prompt=row.get('input_prompt', ''),
                 expected_output=row.get('expected_output'),
-                metadata={'category': row.get('category', 'general')}
+                metadata={
+                    'category': row.get('category', 'general'),
+                    'severity': row.get('severity', 'S2')
+                }
             )
             cases.append(case)
     

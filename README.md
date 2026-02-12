@@ -2,24 +2,30 @@
 
 **回帰テスト×運用に特化した Dev 向け CI プロダクト（LLM/Agent 品質劣化の自動検知）**
 
-[![Tests](https://img.shields.io/badge/tests-124%20passed-success)](tests/)
+[![Tests](https://img.shields.io/badge/tests-255%20passed-success)](tests/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](Dockerfile)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-LLMOps Lab は、LLM/Agent の変更（prompt / tool / model / provider / code）による **品質劣化を CI 上で検知**し、どこが悪化したかを自動で要約するための実験・実装リポジトリです。
+LLMOps Lab は、LLM/Agent の変更（prompt / tool / model / provider / code）による **品質劣化を CI 上で自動検知**し、どこが悪化したかを要約するプロダクトです。
 
-中心は **Agent Regression（AgentReg）** で、JSONL 永続化・週次/期間比較・Top 回帰ケース抽出までを備えています。LLM Gateway（FastAPI）や可観測性（Streamlit）は補助コンポーネントとして同梱しています。
+中心は **AgentReg**（Agent Regression Gate）— CSV ケース管理・JSONL 永続化・ベースライン比較・CI ゲート判定・失敗原因分析・Flakiness 検知を備えた CI ネイティブな回帰テストフレームワークです。LLM Gateway（FastAPI）や可観測性（Streamlit）は補助コンポーネントとして同梱しています。
 
 ---
 
 ## ✨ 主要機能
 
-### ✅ Agent Regression（CI 向け）
-- **回帰テスト実行** - CSV でケース管理、毎回同一入力で検証
-- **JSONL 永続化** - 1ケース=1行で保存（`runs/agentreg/YYYYMMDD.jsonl`）
-- **期間比較（ベースライン）** - 成功率デルタ、失敗タイプ増減、Top 回帰ケース
-- **Markdown レポート** - 週次レポート生成（CI で artifact / PR コメント化しやすい）
+### 🛡️ AgentReg — CI 回帰ゲート
+- **回帰テスト実行** — CSV でケース管理、毎回同一入力で検証（`run-daily`）
+- **JSONL 永続化** — 1 ケース = 1 行（`runs/agentreg/YYYYMMDD.jsonl`）
+- **ベースライン比較** — main artifact or trailing-window; S1/S2 成功率デルタ
+- **CI ゲート判定** — `agentops check` → 閾値違反で exit 1 → PR ブロック
+- **YAML しきい値設定** — `.agentreg.yml` でデフォルト / PR ラベル・パスルール切替
+- **ケース属性** — CSV に `owner`, `tags`, `min_pass_rate` カラム（per-case ゲート）
+- **失敗差分の説明** — 新規回帰 / 失敗タイプ変化 / JSON schema 不一致 / レイテンシ急増 / トークン増加を自動検出
+- **Flakiness 検知** — `--repeat N` で安定性を評価、🎲 フラグで PR コメントに表示
+- **PR コメント** — ゲート結果を Markdown で PR に自動投稿
+- **Markdown レポート** — 週次レポート生成（artifact / PR コメント化）
 
 ### 🎯 コア機能
 - **FastAPI Gateway** - RESTful API で LLM プロバイダーを統一
@@ -54,19 +60,24 @@ LLMOps Lab は、LLM/Agent の変更（prompt / tool / model / provider / code�
 # 1. セットアップ
 pip install -e ".[dev]"
 
-# 2. 回帰テスト（AgentReg）
-python -m agentops run-daily cases/agent_regression.csv --log-dir runs/agentreg -v
+# 2. 回帰テスト実行（3 回反復で Flakiness 検知）
+python -m agentops run-daily cases/agent_regression.csv --log-dir runs/agentreg --repeat 3 -v
 
-# 3. ベースライン比較レポート（直近7日 vs その前7日）
-python -m agentops report --log-dir runs/agentreg --days 7 --baseline-days 7 -o reports/weekly_regression_report.md -v
+# 3. CI ゲート判定（ベースライン比較 + 閾値チェック）
+python -m agentops check --log-dir runs/agentreg --baseline-days 7 \
+  --config .agentreg.yml --cases-file cases/agent_regression.csv
 
-# 4. API 起動（Gateway: 任意）
+# 4. 週次レポート生成
+python -m agentops report --log-dir runs/agentreg --days 7 --baseline-days 7 \
+  -o reports/weekly_regression_report.md -v
+
+# 5. API 起動（Gateway: 任意）
 python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
 
-# 5. ダッシュボード起動（別ターミナル / 任意）
+# 6. ダッシュボード起動（別ターミナル / 任意）
 streamlit run src/llmops/dashboard.py
 
-# 6. テスト実行
+# 7. テスト実行
 make test
 ```
 
@@ -183,24 +194,34 @@ Streamlit ダッシュボードでリアルタイム監視：
 
 ```
 llmops-lab/
-├── src/llmops/              # コア実装
+├── src/agentops/            # AgentReg コア
+│   ├── cli.py               # CLI エントリポイント (run-daily / check / report)
+│   ├── runner.py            # テストケース実行エンジン
+│   ├── check.py             # CI ゲート判定 (run_check / render)
+│   ├── config.py            # YAML 設定ローダー (.agentreg.yml)
+│   ├── load_cases.py        # CSV ケースローダー (owner/tags/min_pass_rate)
+│   ├── diff_explain.py      # 失敗差分の説明エンジン
+│   ├── flakiness.py         # Flakiness / 安定性検知
+│   ├── models.py            # Pydantic v2 モデル (TestCase / TestResult / AgentRunRecord)
+│   ├── aggregate.py         # 集計ロジック
+│   ├── analyze.py           # 回帰分析
+│   ├── render_md.py         # Markdown レポート生成
+│   └── report_weekly.py     # 週次レポートオーケストレータ
+├── src/llmops/              # LLM Gateway
 │   ├── gateway.py           # FastAPI アプリケーション
 │   ├── llm_client.py        # LLM プロバイダー抽象化
-│   ├── pricing.py           # コスト計算
-│   ├── prompt_manager.py    # プロンプトバージョニング
 │   ├── cache.py             # In-Memory キャッシュ
 │   ├── rate_limiter.py      # レート制限（Token Bucket）
-│   ├── config.py            # 環境変数処理
 │   └── dashboard.py         # Streamlit ダッシュボード
-├── tests/                   # テストスイート（99 テスト）
-├── configs/                 # 設定ファイル
-├── prompts/                 # プロンプトテンプレート（v1.0, v2.0, v3.0）
-├── evals/                   # 評価スクリプト
+├── cases/                   # テストケース CSV (30 cases: 15 S1 + 15 S2)
+├── .agentreg.yml            # AgentReg しきい値設定
+├── .github/workflows/       # CI ワークフロー (7 files)
+│   └── regression.yml       # AgentReg CI パイプライン
+├── tests/                   # テストスイート（255 テスト）
 ├── docs/                    # ドキュメント
 ├── Dockerfile               # API 用（マルチステージビルド）
-├── Dockerfile.dashboard     # Dashboard 用
 ├── docker-compose.yml       # オーケストレーション
-└── pyproject.toml          # プロジェクト定義
+└── pyproject.toml           # プロジェクト定義
 ```
 
 ---
@@ -220,7 +241,7 @@ pytest tests/test_config.py -v
 pytest --cov=src/llmops tests/
 ```
 
-**テスト**: 124 テスト、100% 合格
+**テスト**: 255 テスト、100% 合格
 
 ---
 
@@ -282,101 +303,116 @@ docker-compose down -v
 
 ## 🎯 実装状況
 
-### ✅ 完成（Level 3.5）
+### ✅ AgentReg CI プロダクト
+
+**P0 — CI プロダクトとして成立**
+- [x] `agentops check` コマンド（ベースライン比較 → exit code 判定）
+- [x] ベースラインパターン（main artifact + `--baseline-dir` / trailing window）
+- [x] PR コメント（`--output-file` → `github-script` で投稿）
+
+**P1 — 運用レベル**
+- [x] YAML しきい値設定（`.agentreg.yml`）
+- [x] PR ラベル / 変更パスによるルール切替
+- [x] ケース属性 CSV 拡張（`owner`, `tags`, `min_pass_rate`）
+- [x] Per-case ゲート（`min_pass_rate` 違反で exit 1）
+
+**P2 — 原因分析 & 安定性**
+- [x] 失敗差分の説明（新規回帰 / 失敗タイプ変化 / JSON schema 不一致 / レイテンシ急増 / トークン増加）
+- [x] Flakiness 検知（`--repeat N` で安定性評価、🎲 フラグ表示）
+
+### ✅ LLM Gateway & 可観測性
 
 - [x] FastAPI Gateway（POST /generate、GET /health、GET /prompts）
 - [x] Mock & OpenAI プロバイダー
-- [x] Retry/Timeout/エラー分類
+- [x] Retry / Timeout / エラー分類
 - [x] JSONL ロギング（PII マスキング）
-- [x] コスト計測
-- [x] プロンプトバージョニング（3 テンプレート）
-- [x] In-Memory キャッシュ（TTL + LRU）
-- [x] レート制限（QPS + TPM）
-- [x] 環境変数設定（11 個）
-- [x] Docker 化（API + Dashboard）
-- [x] Streamlit ダッシュボード
-- [x] 包括的テスト（99 テスト）
-- [x] GitHub Actions CI/CD
-- [x] 完全なドキュメント
+- [x] In-Memory キャッシュ（TTL + LRU）、レート制限（QPS + TPM）
+- [x] Streamlit ダッシュボード、Docker 化
+- [x] 包括的テスト（255 テスト）
+- [x] GitHub Actions CI/CD（7 ワークフロー）
 
-### 🔮 今後の拡張（Level 4.0）
+### 🔮 今後の拡張
 
 - [ ] 複数プロバイダー（Anthropic Claude、Google Gemini、Ollama）
-- [ ] 外部キャッシュ（Redis）
-- [ ] Prometheus/Grafana メトリクス
-- [ ] ログローテーション
-- [ ] Human Feedback ループ
-- [ ] A/B テスト機能
-- [ ] Agent Regression の評価メトリクス拡張
+- [ ] 外部キャッシュ（Redis）/ Prometheus メトリクス
+- [ ] Human Feedback ループ / A/B テスト
 
 ---
 
-## 🧪 Agent Regression (WIP)
+## 🧪 AgentReg — CLI リファレンス
 
-**Agent Regression Testing Framework** - エージェント出力の品質と一貫性を保証する自動テストフレームワーク
-
-### 概要
-- **テストケース管理**: CSV形式でテストケースを定義・管理
-- **自動実行**: CLI/プログラムからテスト実行
-- **評価・レポート**: パスレート、スコア、実行時間などのメトリクス
-- **週次レポート**: トレンド分析と改善提案
-
-### クイックスタート
+### `run-daily` — 回帰テスト実行
 
 ```bash
-# テストケースを作成
-# cases/agent_regression.csv を編集
-
-# テスト実行
-python -m agentops.cli cases/agent_regression.csv -v
-
-# 週次レポート生成（当週vs前週比較）
-python -m agentops report --days 14 --baseline-days 14 -o reports/regression_report.md --verbose
-
-# レポート確認
-ls reports/agentreg/
-cat reports/regression_report.md
+python -m agentops run-daily cases/agent_regression.csv \
+  --log-dir runs/agentreg \
+  --run-id "$(date +%Y%m%d)-nightly" \
+  --repeat 3 \
+  -v
 ```
 
-### 回帰分析レポート機能
+| フラグ | 説明 |
+|--------|------|
+| `--log-dir` | JSONL 保存先ディレクトリ |
+| `--run-id` | 実行 ID（デフォルト: 自動生成） |
+| `--repeat N` | 同一ケースを N 回反復実行（Flakiness 検知用） |
+| `-v` | 詳細ログ出力 |
 
-**新機能**: Week-over-Week 比較による回帰検出
+### `check` — CI ゲート判定
 
 ```bash
-# 基本的な使用方法
-python -m agentops report --days 7
-
-# ベースライン期間を指定して実行
-python -m agentops report --days 14 --baseline-days 14 -o reports/weekly_report.md
-
-# 詳細ログ出力
-python -m agentops report --days 7 --verbose
+python -m agentops check \
+  --log-dir runs/agentreg \
+  --baseline-dir baseline/runs/agentreg \
+  --config .agentreg.yml \
+  --cases-file cases/agent_regression.csv \
+  --labels hotfix \
+  --output-file gate-result.md
 ```
 
-**レポートに含まれる情報:**
-- 📈 Week-over-Week Summary - 全体/S1/S2 成功率の変化
-- 📊 失敗タイプの変化 - failure_type ごとの増減数
-- 🔴 トップ回帰ケース - 最悪化した 5 つのテストケース（S1 優先）
-- 📋 Individual Runs - 各実行の詳細メトリクス
+| フラグ | 説明 |
+|--------|------|
+| `--baseline-dir` | ベースライン JSONL ディレクトリ（main artifact） |
+| `--baseline-days N` | trailing window 比較（`--baseline-dir` なし時） |
+| `--config PATH` | `.agentreg.yml` パス（しきい値設定） |
+| `--cases-file PATH` | CSV パス（per-case `min_pass_rate` チェック用） |
+| `--labels L1,L2` | PR ラベル（ルールマッチ用） |
+| `--changed-files` | 変更ファイル（パスルールマッチ用） |
+| `--output-file PATH` | Markdown 出力ファイル（PR コメント用） |
+| `--s1-threshold` | S1 成功率しきい値（CLI 最優先） |
+| `--overall-threshold` | 全体成功率しきい値 |
 
-**レポート例:**
+**ゲート出力例:**
+
 ```
-## Week-over-Week Summary
-- 全体成功率: 62.50% (前週: 100.00%) → **-37.50%**
-- S1成功率: 25.00% (前週: 100.00%) → **-75.00%**
-- S2成功率: 100.00% (前週: 100.00%) → **+0.00%**
+## 🔴 AgentReg Gate: FAIL
+| Metric       | Value  | Threshold | Status |
+|-------------|--------|-----------|--------|
+| S1 pass rate | 85.0%  | 100%      | ❌     |
+| Overall      | 90.0%  | 80%       | ✅     |
 
-## トップ回帰ケース（前週比で最も悪化）
-| ケース | 重要度 | カテゴリ | 前週 | 今週 | 変化 | 主な失敗 |
-|--------|--------|---------|------|------|------|---------|
-| TC004 | S1 | api | 100.0% | 25.0% | **-75.0%** | quality_fail |
+### Failure Explanations
+| Case  | Sev | Type     | Explanation                          |
+|-------|-----|----------|--------------------------------------|
+| TC004 | S1  | bad_json | 新規回帰; JSON schema不一致: 欠損キー: b |
+
+### Stability Report (1 flaky 🎲)
+| Case  | Runs | Pass Rate | Flaky | Latency CV |
+|-------|------|-----------|-------|------------|
+| TC007 | 3    | 67%       | 🎲    | 0.32       |
+```
+
+### `report` — 週次レポート
+
+```bash
+python -m agentops report --log-dir runs/agentreg --days 7 --baseline-days 7 \
+  -o reports/weekly_regression_report.md -v
 ```
 
 ### ドキュメント
+- [CI プロダクト方針（ロードマップ）](docs/AGENTREG_CI_PRODUCT.md)
+- [CI の使い方](docs/CI.md)
 - [オンボーディングガイド](docs/agentreg_onboarding_onepager.md)
-- [週次レポートテンプレート](docs/agentreg_weekly_report_template.md)
-
-**ステータス**: 🚧 開発中（基本機能実装済み）
 
 ---
 
@@ -405,4 +441,4 @@ LLMOps Lab Team
 
 ---
 
-**バージョン**: 0.3.5 | **ステータス**: Level 3.5 完成 ✅ | **本番環境対応**: Ready 🚀
+**バージョン**: 0.4.0 | **AgentReg**: P0 / P1 / P2 完了 ✅ | **テスト**: 255 passed 🚀

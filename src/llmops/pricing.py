@@ -61,7 +61,7 @@ def calculate_cost_usd(
         input_cost = (prompt_tokens / 1000) * pricing["input"]
         output_cost = (completion_tokens / 1000) * pricing["output"]
         return round(input_cost + output_cost, 6)
-    
+
     # Default: free (mock provider or unknown)
     return 0.0
 

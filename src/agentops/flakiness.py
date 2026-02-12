@@ -20,10 +20,10 @@ import statistics
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-
 # ------------------------------------------------------------------
 # Data structures
 # ------------------------------------------------------------------
+
 
 @dataclass
 class CaseStability:
@@ -39,7 +39,7 @@ class CaseStability:
     is_flaky: bool
     failure_types: List[str] = field(default_factory=list)
     latency_std: Optional[float] = None  # std dev of latency_ms
-    latency_cv: Optional[float] = None   # coefficient of variation
+    latency_cv: Optional[float] = None  # coefficient of variation
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -60,6 +60,7 @@ class CaseStability:
 # ------------------------------------------------------------------
 # Core logic
 # ------------------------------------------------------------------
+
 
 def compute_flakiness(
     results: List,
@@ -117,19 +118,21 @@ def compute_flakiness(
             mean = statistics.mean(latencies)
             lat_cv = (lat_std / mean) if mean > 0 else None
 
-        stats.append(CaseStability(
-            case_id=case_id,
-            severity=sev,
-            category=cat,
-            total_runs=len(runs),
-            passed_runs=passed,
-            failed_runs=failed,
-            pass_rate=rate,
-            is_flaky=is_flaky,
-            failure_types=sorted(ft_set),
-            latency_std=lat_std,
-            latency_cv=lat_cv,
-        ))
+        stats.append(
+            CaseStability(
+                case_id=case_id,
+                severity=sev,
+                category=cat,
+                total_runs=len(runs),
+                passed_runs=passed,
+                failed_runs=failed,
+                pass_rate=rate,
+                is_flaky=is_flaky,
+                failure_types=sorted(ft_set),
+                latency_std=lat_std,
+                latency_cv=lat_cv,
+            )
+        )
 
     # Sort: flaky first → low pass_rate → S1 first
     stats.sort(
@@ -150,6 +153,7 @@ def flaky_cases(results: List, min_runs: int = 2) -> List[CaseStability]:
 # ------------------------------------------------------------------
 # Markdown rendering
 # ------------------------------------------------------------------
+
 
 def render_flakiness_report(
     stats: List[CaseStability],
@@ -172,8 +176,7 @@ def render_flakiness_report(
     lines = [
         "### Stability Report",
         "",
-        f"Analysed **{len(items)}** cases "
-        f"({flaky_count} flaky 🎲)",
+        f"Analysed **{len(items)}** cases " f"({flaky_count} flaky 🎲)",
         "",
         "| Case | Sev | Runs | Pass Rate | Flaky | Failure Types | Latency CV |",
         "|------|-----|------|-----------|-------|---------------|------------|",

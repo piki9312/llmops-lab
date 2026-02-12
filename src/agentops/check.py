@@ -19,17 +19,21 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .aggregate import severity_pass_rate, compute_case_pass_rates
+from .aggregate import compute_case_pass_rates, severity_pass_rate
 from .analyze import compute_pass_rate_delta, compute_top_regressions
 from .config import AgentRegConfig, Thresholds, load_config
-from .diff_explain import FailureExplanation, explain_failures, render_failure_explanations
+from .diff_explain import (
+    FailureExplanation,
+    explain_failures,
+    render_failure_explanations,
+)
 from .flakiness import CaseStability, compute_flakiness, render_flakiness_report
 from .report_weekly import WeeklyReporter
-
 
 # ------------------------------------------------------------------
 # Data structures
 # ------------------------------------------------------------------
+
 
 @dataclass
 class ThresholdResult:
@@ -63,15 +67,15 @@ class CheckResult:
 
     @property
     def gate_passed(self) -> bool:
-        return (
-            all(t.passed for t in self.thresholds)
-            and all(t.passed for t in self.case_thresholds)
+        return all(t.passed for t in self.thresholds) and all(
+            t.passed for t in self.case_thresholds
         )
 
 
 # ------------------------------------------------------------------
 # Core logic
 # ------------------------------------------------------------------
+
 
 def run_check(
     *,
@@ -111,7 +115,8 @@ def run_check(
         config = AgentRegConfig()  # built-in defaults
 
     resolved = config.resolve_thresholds(
-        labels=labels, changed_files=changed_files,
+        labels=labels,
+        changed_files=changed_files,
     )
 
     eff_s1 = s1_threshold if s1_threshold is not None else resolved.s1_pass_rate
@@ -124,7 +129,9 @@ def run_check(
 
     reporter = WeeklyReporter()
     current_reports = reporter.load_from_jsonl(
-        log_dir=log_dir, start_date=current_start, end_date=end_date,
+        log_dir=log_dir,
+        start_date=current_start,
+        end_date=end_date,
     )
 
     if baseline_dir:
@@ -135,7 +142,9 @@ def run_check(
         baseline_end = current_start - timedelta(days=1)
         baseline_start = baseline_end - timedelta(days=baseline_days)
         baseline_reports = reporter.load_from_jsonl(
-            log_dir=log_dir, start_date=baseline_start, end_date=baseline_end,
+            log_dir=log_dir,
+            start_date=baseline_start,
+            end_date=baseline_end,
         )
 
     # Flatten results across runs
@@ -154,7 +163,9 @@ def run_check(
     top_regs: List[Dict[str, Any]] = []
     if baseline_results:
         top_regs = compute_top_regressions(
-            current_results, baseline_results, top_n=eff_top_n,
+            current_results,
+            baseline_results,
+            top_n=eff_top_n,
         )
 
     # Threshold evaluation
@@ -162,30 +173,36 @@ def run_check(
 
     # S1 threshold
     if s1_stats[2] > 0:
-        thresholds.append(ThresholdResult(
-            name="S1 pass rate",
-            threshold=eff_s1,
-            actual=s1_stats[0],
-            passed=s1_stats[0] >= eff_s1,
-            detail=f"{s1_stats[1]}/{s1_stats[2]} passed",
-        ))
+        thresholds.append(
+            ThresholdResult(
+                name="S1 pass rate",
+                threshold=eff_s1,
+                actual=s1_stats[0],
+                passed=s1_stats[0] >= eff_s1,
+                detail=f"{s1_stats[1]}/{s1_stats[2]} passed",
+            )
+        )
     else:
-        thresholds.append(ThresholdResult(
-            name="S1 pass rate",
-            threshold=eff_s1,
-            actual=0.0,
-            passed=True,
-            detail="no S1 cases (skip)",
-        ))
+        thresholds.append(
+            ThresholdResult(
+                name="S1 pass rate",
+                threshold=eff_s1,
+                actual=0.0,
+                passed=True,
+                detail="no S1 cases (skip)",
+            )
+        )
 
     # Overall threshold
-    thresholds.append(ThresholdResult(
-        name="Overall pass rate",
-        threshold=eff_overall,
-        actual=overall_rate,
-        passed=overall_rate >= eff_overall,
-        detail=f"{passed}/{total} passed",
-    ))
+    thresholds.append(
+        ThresholdResult(
+            name="Overall pass rate",
+            threshold=eff_overall,
+            actual=overall_rate,
+            passed=overall_rate >= eff_overall,
+            detail=f"{passed}/{total} passed",
+        )
+    )
 
     # --- Per-case min_pass_rate checks --------------------------------
     case_thresholds: List[ThresholdResult] = []
@@ -197,13 +214,15 @@ def run_check(
             if actual_rate is None:
                 continue  # case not in current run
             actual_pct = actual_rate * 100
-            case_thresholds.append(ThresholdResult(
-                name=f"Case {case_id}",
-                threshold=min_rate,
-                actual=actual_pct,
-                passed=actual_pct >= min_rate,
-                detail=f"min_pass_rate={min_rate}%",
-            ))
+            case_thresholds.append(
+                ThresholdResult(
+                    name=f"Case {case_id}",
+                    threshold=min_rate,
+                    actual=actual_pct,
+                    passed=actual_pct >= min_rate,
+                    detail=f"min_pass_rate={min_rate}%",
+                )
+            )
 
     # --- P2: Failure explanations -----------------------------------
     failure_exps: List[FailureExplanation] = []
@@ -238,6 +257,7 @@ def run_check(
 # Per-case min_pass_rate loader
 # ------------------------------------------------------------------
 
+
 def _load_case_min_rates(cases_file: Optional[str]) -> Dict[str, float]:
     """Read ``min_pass_rate`` from a CSV cases file.
 
@@ -251,6 +271,7 @@ def _load_case_min_rates(cases_file: Optional[str]) -> Dict[str, float]:
     if not p.exists():
         return {}
     import csv
+
     result: Dict[str, float] = {}
     with open(p, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -269,6 +290,7 @@ def _load_case_min_rates(cases_file: Optional[str]) -> Dict[str, float]:
 # Markdown rendering
 # ------------------------------------------------------------------
 
+
 def render_check_summary(result: CheckResult) -> str:
     """Render a Markdown summary suitable for ``$GITHUB_STEP_SUMMARY``."""
 
@@ -283,9 +305,7 @@ def render_check_summary(result: CheckResult) -> str:
     ]
     for t in result.thresholds:
         icon = "✅" if t.passed else "❌"
-        lines.append(
-            f"| {t.name} | {t.threshold:.1f}% | {t.actual:.2f}% | {icon} {t.detail} |"
-        )
+        lines.append(f"| {t.name} | {t.threshold:.1f}% | {t.actual:.2f}% | {icon} {t.detail} |")
 
     lines += [
         "",
@@ -310,9 +330,7 @@ def render_check_summary(result: CheckResult) -> str:
     if failed_cases:
         lines += ["", "### Case Threshold Violations"]
         for t in failed_cases:
-            lines.append(
-                f"- **{t.name}**: {t.actual:.1f}% < {t.threshold:.0f}% ({t.detail})"
-            )
+            lines.append(f"- **{t.name}**: {t.actual:.1f}% < {t.threshold:.0f}% ({t.detail})")
 
     # P2: Failure explanations
     if result.failure_explanations:

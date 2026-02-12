@@ -26,10 +26,7 @@ def compute_case_pass_rates(results: List) -> Dict[str, float]:
         total += 1
         case_stats[case_id] = (passed, total)
 
-    return {
-        case_id: (p / t if t > 0 else 0.0)
-        for case_id, (p, t) in case_stats.items()
-    }
+    return {case_id: (p / t if t > 0 else 0.0) for case_id, (p, t) in case_stats.items()}
 
 
 def normalize_severity(value: Optional[str]) -> Optional[str]:
@@ -52,12 +49,14 @@ def severity_pass_rate(results: List, severity: str) -> Tuple[float, int, int]:
         (rate_percent, passed_count, total_count)
     """
     filtered = [
-        r for r in results
+        r
+        for r in results
         if normalize_severity(
             (r.metrics or {}).get("severity")
             or (r.metrics or {}).get("priority")
             or (r.metrics or {}).get("tier")
-        ) == severity
+        )
+        == severity
     ]
     total = len(filtered)
     passed = sum(1 for r in filtered if r.passed)
@@ -132,10 +131,7 @@ def top_failures(results: List, limit: int = 10) -> List[Tuple[str, str, int, st
             -x[1],
         ),
     )[:limit]
-    return [
-        (case_id, ft, count, suspected_cause(ft))
-        for (case_id, ft), count in sorted_items
-    ]
+    return [(case_id, ft, count, suspected_cause(ft)) for (case_id, ft), count in sorted_items]
 
 
 def suspected_cause(failure_type: str) -> str:

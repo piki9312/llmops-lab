@@ -5,35 +5,31 @@ This module provides command-line tools for running regression tests.
 """
 
 import argparse
-import sys
 import json
+import sys
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
-from datetime import datetime, timezone, timedelta
 
-from .load_cases import load_from_csv, load_from_directory
-from .runner import RegressionRunner
-from .evaluator import Evaluator
-from .report_weekly import WeeklyReporter
-from .models import AgentRunRecord
-from .check import run_check, render_check_summary
+from .check import render_check_summary, run_check
 from .config import load_config
+from .evaluator import Evaluator
+from .load_cases import load_from_csv, load_from_directory
+from .models import AgentRunRecord
+from .report_weekly import WeeklyReporter
+from .runner import RegressionRunner
 
 
-def run_regression(
-    cases_file: str,
-    output_dir: Optional[str] = None,
-    verbose: bool = False
-) -> int:
+def run_regression(cases_file: str, output_dir: Optional[str] = None, verbose: bool = False) -> int:
     """
     Run regression tests from command line.
-    
+
     Args:
         cases_file: Path to CSV file with test cases
         output_dir: Optional directory for output reports
         verbose: Enable verbose output
-        
+
     Returns:
         Exit code (0 for success, 1 for failure)
     """
@@ -44,13 +40,13 @@ def run_regression(
         cases = load_from_csv(cases_file)
         if verbose:
             print(f"Loaded {len(cases)} test cases")
-        
+
         # Run tests
         if verbose:
             print("Running regression tests...")
         runner = RegressionRunner(use_llmops=True)
         report = runner.run_all(cases)
-        
+
         # Display results
         summary = Evaluator.generate_summary(report)
         print(f"\n=== Regression Test Results ===")
@@ -62,7 +58,7 @@ def run_regression(
         print(f"Average Score: {summary['average_score']:.2f}")
         print(f"Average Latency: {summary['avg_latency_ms']:.2f} ms")
         print(f"Total Cost: ${summary['total_cost_usd']:.6f}")
-        
+
         # Save report if output directory specified
         if output_dir:
             output_path = Path(output_dir)
@@ -70,9 +66,9 @@ def run_regression(
             # TODO: Implement report saving
             if verbose:
                 print(f"Report saved to {output_dir}")
-        
+
         return 0 if report.failed_cases == 0 else 1
-        
+
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -87,7 +83,7 @@ def run_daily(
 ) -> int:
     """
     Run daily regression tests and save results to JSONL.
-    
+
     Args:
         cases_file: Path to CSV file with test cases
         log_dir: Directory for JSONL logs (default: runs/agentreg)
@@ -95,7 +91,7 @@ def run_daily(
         repeat: Number of times to run the full suite (default: 1).
                 When > 1, each iteration uses a distinct run_id suffix
                 so per-case flakiness can be detected.
-        
+
     Returns:
         Exit code (0 for success, 1 for failure)
     """
@@ -106,7 +102,7 @@ def run_daily(
         cases = load_from_csv(cases_file)
         if verbose:
             print(f"Loaded {len(cases)} test cases")
-        
+
         # Generate base run ID
         base_run_id = run_id or str(uuid.uuid4())
 
@@ -134,9 +130,7 @@ def run_daily(
             with open(jsonl_file, "a", encoding="utf-8") as f:
                 for test_case, test_result in zip(cases, report.results):
                     record = AgentRunRecord.from_test_result(
-                        result=test_result,
-                        run_id=iter_run_id,
-                        test_case=test_case
+                        result=test_result, run_id=iter_run_id, test_case=test_case
                     )
                     f.write(record.model_dump_json() + "\n")
                     records_written += 1
@@ -160,18 +154,23 @@ def run_daily(
                 print(f"Passed: {summary['passed_cases']}")
                 print(f"Failed: {summary['failed_cases']}")
                 print(f"Pass Rate: {summary['pass_rate_percent']:.2f}%")
-                print(f"S1 Pass Rate: {summary['pass_rate_s1']}  ({summary['s1_passed']}/{summary['s1_total']})")
-                print(f"S2 Pass Rate: {summary['pass_rate_s2']}  ({summary['s2_passed']}/{summary['s2_total']})")
+                print(
+                    f"S1 Pass Rate: {summary['pass_rate_s1']}  ({summary['s1_passed']}/{summary['s1_total']})"
+                )
+                print(
+                    f"S2 Pass Rate: {summary['pass_rate_s2']}  ({summary['s2_passed']}/{summary['s2_total']})"
+                )
                 print(f"Average Latency: {summary['avg_latency_ms']:.2f} ms")
                 print(f"Total Cost: ${summary['total_cost_usd']:.6f}")
                 print(f"Total Records: {total_records}")
                 print(f"\nLog: {jsonl_file}")
-        
+
         return 0 if not any_failure else 1
-        
+
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 
@@ -181,88 +180,82 @@ def generate_weekly_report(
     days: int = 7,
     baseline_days: Optional[int] = None,
     output: Optional[str] = None,
-    verbose: bool = False
+    verbose: bool = False,
 ) -> int:
     """
     Generate weekly report from JSONL logs with optional baseline comparison.
-    
+
     Args:
         log_dir: Directory containing JSONL logs
         days: Number of days to include in current period (default: 7)
         baseline_days: Number of days for baseline period (default: same as days)
         output: Output file path (default: print to stdout)
         verbose: Enable verbose output
-        
+
     Returns:
         Exit code (0 for success, 1 for failure)
     """
     try:
         if baseline_days is None:
             baseline_days = days
-            
+
         if verbose:
             print(f"Loading JSONL logs from {log_dir}...")
-        
+
         # Calculate date ranges (timezone naive for file date comparison)
         end_date = datetime.now()
         current_start = end_date - timedelta(days=days)
         baseline_end = current_start - timedelta(days=1)
         baseline_start = baseline_end - timedelta(days=baseline_days)
-        
+
         # Load current period reports from JSONL
         reporter = WeeklyReporter()
         reports = reporter.load_from_jsonl(
-            log_dir=log_dir,
-            start_date=current_start,
-            end_date=end_date
+            log_dir=log_dir, start_date=current_start, end_date=end_date
         )
-        
+
         # Load baseline period reports from JSONL
         baseline_reports = reporter.load_from_jsonl(
-            log_dir=log_dir,
-            start_date=baseline_start,
-            end_date=baseline_end
+            log_dir=log_dir, start_date=baseline_start, end_date=baseline_end
         )
-        
+
         if not reports:
             msg = f"No reports found in {log_dir} for the last {days} days"
             if output:
                 # Write a minimal placeholder so downstream steps don't break
                 output_path = Path(output)
                 output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_text(
-                    f"# AgentReg Report\n\n{msg}\n", encoding="utf-8"
-                )
+                output_path.write_text(f"# AgentReg Report\n\n{msg}\n", encoding="utf-8")
                 print(f"Report saved to {output} (no data)")
             else:
                 print(msg)
             return 0
-        
+
         if verbose:
             print(f"Loaded {len(reports)} current regression runs")
             if baseline_reports:
                 print(f"Loaded {len(baseline_reports)} baseline regression runs")
-        
+
         # Generate report with baseline comparison
         report_content = reporter.generate_report(
-            reports,
-            previous_week_reports=baseline_reports if baseline_reports else None
+            reports, previous_week_reports=baseline_reports if baseline_reports else None
         )
-        
+
         # Output report
         if output:
             output_path = Path(output)
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(report_content, encoding='utf-8')
+            output_path.write_text(report_content, encoding="utf-8")
             print(f"Report saved to {output}")
         else:
             print(report_content)
-        
+
         return 0
-        
+
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 
@@ -299,10 +292,14 @@ def check_gate(
 
         # Parse comma-separated labels / changed_files
         label_list = [l.strip() for l in labels.split(",") if l.strip()] if labels else []
-        file_list = [f.strip() for f in changed_files.split(",") if f.strip()] if changed_files else []
+        file_list = (
+            [f.strip() for f in changed_files.split(",") if f.strip()] if changed_files else []
+        )
 
         if verbose:
-            bl = f"baseline_dir={baseline_dir}" if baseline_dir else f"baseline_days={baseline_days}"
+            bl = (
+                f"baseline_dir={baseline_dir}" if baseline_dir else f"baseline_days={baseline_days}"
+            )
             cfg_desc = config_path or "(auto-detect)"
             print(
                 f"Gate check: log_dir={log_dir} days={days} {bl} "
@@ -335,9 +332,13 @@ def check_gate(
         print(f"Baseline runs: {result.baseline_runs}")
         # Determine effective thresholds from result for display
         eff_s1 = next((t.threshold for t in result.thresholds if t.name == "S1 pass rate"), 100.0)
-        eff_overall = next((t.threshold for t in result.thresholds if t.name == "Overall pass rate"), 80.0)
+        eff_overall = next(
+            (t.threshold for t in result.thresholds if t.name == "Overall pass rate"), 80.0
+        )
         print(f"Overall : {result.overall_rate:.2f}% (threshold {eff_overall}%)")
-        print(f"S1      : {result.s1_rate:.2f}% ({result.s1_passed}/{result.s1_total}, threshold {eff_s1}%)")
+        print(
+            f"S1      : {result.s1_rate:.2f}% ({result.s1_passed}/{result.s1_total}, threshold {eff_s1}%)"
+        )
         print(f"S2      : {result.s2_rate:.2f}% ({result.s2_passed}/{result.s2_total})")
 
         for t in result.thresholds:
@@ -381,6 +382,7 @@ def check_gate(
         md = render_check_summary(result)
         if write_summary:
             import os as _os
+
             summary_path = _os.environ.get("GITHUB_STEP_SUMMARY")
             if summary_path:
                 Path(summary_path).write_text(md, encoding="utf-8")
@@ -397,92 +399,66 @@ def check_gate(
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 
 
 def main():
     """Main CLI entry point."""
-    parser = argparse.ArgumentParser(
-        description="Agent Regression Testing Tool"
-    )
-    
+    parser = argparse.ArgumentParser(description="Agent Regression Testing Tool")
+
     subparsers = parser.add_subparsers(dest="command", help="Commands")
-    
+
     # run command (existing behavior)
     run_parser = subparsers.add_parser("run", help="Run regression tests")
+    run_parser.add_argument("cases_file", help="Path to CSV file containing test cases")
     run_parser.add_argument(
-        "cases_file",
-        help="Path to CSV file containing test cases"
+        "-o", "--output", dest="output_dir", help="Output directory for reports"
     )
-    run_parser.add_argument(
-        "-o", "--output",
-        dest="output_dir",
-        help="Output directory for reports"
-    )
-    run_parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Enable verbose output"
-    )
-    
+    run_parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+
     # run-daily command (new JSONL persistence)
     daily_parser = subparsers.add_parser("run-daily", help="Run daily regression and save to JSONL")
-    daily_parser.add_argument(
-        "cases_file",
-        help="Path to CSV file containing test cases"
-    )
+    daily_parser.add_argument("cases_file", help="Path to CSV file containing test cases")
     daily_parser.add_argument(
         "--log-dir",
         default="runs/agentreg",
-        help="Directory for JSONL logs (default: runs/agentreg)"
+        help="Directory for JSONL logs (default: runs/agentreg)",
     )
     daily_parser.add_argument(
-        "--run-id",
-        default=None,
-        help="Optional run_id (useful for CI correlation)"
+        "--run-id", default=None, help="Optional run_id (useful for CI correlation)"
     )
     daily_parser.add_argument(
         "--repeat",
         type=int,
         default=1,
-        help="Run the full suite N times for flakiness detection (default: 1)"
+        help="Run the full suite N times for flakiness detection (default: 1)",
     )
-    daily_parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Enable verbose output"
-    )
-    
+    daily_parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+
     # report command (generate weekly report from JSONL)
     report_parser = subparsers.add_parser("report", help="Generate weekly report from JSONL logs")
     report_parser.add_argument(
         "--log-dir",
         default="runs/agentreg",
-        help="Directory containing JSONL logs (default: runs/agentreg)"
+        help="Directory containing JSONL logs (default: runs/agentreg)",
     )
     report_parser.add_argument(
         "--days",
         type=int,
         default=7,
-        help="Number of days to include in current period (default: 7)"
+        help="Number of days to include in current period (default: 7)",
     )
     report_parser.add_argument(
         "--baseline-days",
         type=int,
         default=None,
-        help="Number of days for baseline period (default: same as --days)"
+        help="Number of days for baseline period (default: same as --days)",
     )
-    report_parser.add_argument(
-        "-o", "--output",
-        help="Output file path (default: print to stdout)"
-    )
-    report_parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Enable verbose output"
-    )
-    
+    report_parser.add_argument("-o", "--output", help="Output file path (default: print to stdout)")
+    report_parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+
     # check command (gate: compare current vs baseline)
     check_parser = subparsers.add_parser(
         "check", help="Gate check: compare current period against baseline"
@@ -490,101 +466,95 @@ def main():
     check_parser.add_argument(
         "--log-dir",
         default="runs/agentreg",
-        help="Directory containing JSONL logs (default: runs/agentreg)"
+        help="Directory containing JSONL logs (default: runs/agentreg)",
     )
     check_parser.add_argument(
-        "--days",
-        type=int,
-        default=1,
-        help="Days for current period (default: 1)"
+        "--days", type=int, default=1, help="Days for current period (default: 1)"
     )
     check_parser.add_argument(
-        "--baseline-days",
-        type=int,
-        default=7,
-        help="Days for baseline period (default: 7)"
+        "--baseline-days", type=int, default=7, help="Days for baseline period (default: 7)"
     )
     check_parser.add_argument(
         "--baseline-dir",
         default=None,
         help="Directory containing baseline JSONL (e.g. downloaded artifact from main). "
-             "When set, --baseline-days is ignored."
+        "When set, --baseline-days is ignored.",
     )
     check_parser.add_argument(
         "--s1-threshold",
         type=float,
         default=None,
-        help="S1 pass rate threshold in %% (overrides config; default from .agentreg.yml or 100)"
+        help="S1 pass rate threshold in %% (overrides config; default from .agentreg.yml or 100)",
     )
     check_parser.add_argument(
         "--overall-threshold",
         type=float,
         default=None,
-        help="Overall pass rate threshold in %% (overrides config; default from .agentreg.yml or 80)"
+        help="Overall pass rate threshold in %% (overrides config; default from .agentreg.yml or 80)",
     )
     check_parser.add_argument(
         "--config",
         dest="config_path",
         default=None,
-        help="Path to .agentreg.yml config (default: auto-detect in repo root)"
+        help="Path to .agentreg.yml config (default: auto-detect in repo root)",
     )
     check_parser.add_argument(
         "--labels",
         default=None,
-        help="Comma-separated PR labels for rule matching (e.g. hotfix,urgent)"
+        help="Comma-separated PR labels for rule matching (e.g. hotfix,urgent)",
     )
     check_parser.add_argument(
-        "--changed-files",
-        default=None,
-        help="Comma-separated changed file paths for rule matching"
+        "--changed-files", default=None, help="Comma-separated changed file paths for rule matching"
     )
     check_parser.add_argument(
         "--cases-file",
         default=None,
-        help="Path to CSV cases file for per-case min_pass_rate checks"
+        help="Path to CSV cases file for per-case min_pass_rate checks",
     )
     check_parser.add_argument(
-        "--write-summary",
-        action="store_true",
-        help="Write markdown to $GITHUB_STEP_SUMMARY"
+        "--write-summary", action="store_true", help="Write markdown to $GITHUB_STEP_SUMMARY"
     )
     check_parser.add_argument(
         "--output-file",
         default=None,
-        help="Write gate summary Markdown to this file (for PR comments)"
+        help="Write gate summary Markdown to this file (for PR comments)",
     )
-    check_parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Enable verbose output"
-    )
+    check_parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
 
     args = parser.parse_args()
-    
+
     if args.command == "run":
         sys.exit(run_regression(args.cases_file, args.output_dir, args.verbose))
     elif args.command == "run-daily":
-        sys.exit(run_daily(args.cases_file, args.log_dir, args.verbose, run_id=args.run_id, repeat=args.repeat))
+        sys.exit(
+            run_daily(
+                args.cases_file, args.log_dir, args.verbose, run_id=args.run_id, repeat=args.repeat
+            )
+        )
     elif args.command == "report":
-        sys.exit(generate_weekly_report(
-            args.log_dir, args.days, args.baseline_days, args.output, args.verbose
-        ))
+        sys.exit(
+            generate_weekly_report(
+                args.log_dir, args.days, args.baseline_days, args.output, args.verbose
+            )
+        )
     elif args.command == "check":
-        sys.exit(check_gate(
-            log_dir=args.log_dir,
-            days=args.days,
-            baseline_days=args.baseline_days,
-            baseline_dir=args.baseline_dir,
-            s1_threshold=args.s1_threshold,
-            overall_threshold=args.overall_threshold,
-            write_summary=args.write_summary,
-            output_file=args.output_file,
-            config_path=args.config_path,
-            labels=args.labels,
-            changed_files=args.changed_files,
-            cases_file=args.cases_file,
-            verbose=args.verbose,
-        ))
+        sys.exit(
+            check_gate(
+                log_dir=args.log_dir,
+                days=args.days,
+                baseline_days=args.baseline_days,
+                baseline_dir=args.baseline_dir,
+                s1_threshold=args.s1_threshold,
+                overall_threshold=args.overall_threshold,
+                write_summary=args.write_summary,
+                output_file=args.output_file,
+                config_path=args.config_path,
+                labels=args.labels,
+                changed_files=args.changed_files,
+                cases_file=args.cases_file,
+                verbose=args.verbose,
+            )
+        )
     else:
         parser.print_help()
         sys.exit(1)

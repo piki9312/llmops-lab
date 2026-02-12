@@ -18,7 +18,7 @@ from typing import Optional
 
 import yaml
 from fastapi import FastAPI
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .cache import InMemoryCacheStore, compute_cache_key
 from .config import apply_env_overrides
@@ -121,9 +121,7 @@ def _mask_messages(messages: list[dict]) -> list[dict]:
     """
     masked = []
     for msg in messages:
-        content_hash = hashlib.sha256(msg.get("content", "").encode()).hexdigest()[
-            :8
-        ]
+        content_hash = hashlib.sha256(msg.get("content", "").encode()).hexdigest()[:8]
         masked.append(
             {
                 "role": msg.get("role", "unknown"),
@@ -199,7 +197,7 @@ rate_limiter = RateLimiter(max_qps=MAX_QPS, max_tpm=MAX_TPM) if (MAX_QPS or MAX_
 if CONFIG["provider"] == "openai":
     provider = OpenAIProvider(
         model_name=CONFIG["model"],
-        api_key=CONFIG.get("api_key")  # Falls back to OPENAI_API_KEY env var
+        api_key=CONFIG.get("api_key"),  # Falls back to OPENAI_API_KEY env var
     )
 else:
     # Default to mock provider
@@ -411,7 +409,7 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
 @app.get("/health")
 async def health():
     """Health check endpoint.
-    
+
     入力：なし
     出力：{"status": "ok", "provider": "..."}
     副作用：なし
@@ -419,10 +417,11 @@ async def health():
     """
     return {"status": "ok", "provider": CONFIG["provider"]}
 
+
 @app.get("/prompts")
 async def list_prompts():
     """List available prompt versions.
-    
+
     入力：なし
     出力：{"versions": ["1.0", "2.0", "3.0"], "default": "1.0"}
     副作用：なし
@@ -437,7 +436,7 @@ async def list_prompts():
 @app.get("/prompts/{version}")
 async def get_prompt_info(version: str):
     """Get metadata for a specific prompt version.
-    
+
     入力：version (e.g., "1.0", "2.0")
     出力：{"version": "1.0", "description": "...", "tags": [...], "created_at": "..."}
     副作用：なし
@@ -445,5 +444,8 @@ async def get_prompt_info(version: str):
     """
     info = prompt_manager.get_info(version)
     if not info:
-        return {"error": f"Prompt version {version} not found", "available": prompt_manager.list_versions()}
+        return {
+            "error": f"Prompt version {version} not found",
+            "available": prompt_manager.list_versions(),
+        }
     return info

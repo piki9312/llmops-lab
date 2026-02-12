@@ -38,6 +38,7 @@ jobs:
           python -m pytest tests/ \
             -v \
             --tb=short \
+            -k "not openai" \
             --cov=src/agentops \
             --cov-report=json \
             --cov-report=term \

@@ -50,20 +50,38 @@ def render_report(
 
     # --- Week-over-Week Summary (only when baseline exists) ----
     if prev_results and all_results:
-        lines.extend(_section_wow_summary(all_results, prev_results,
-                                          baseline_rate, current_all_rate, all_delta))
+        lines.extend(
+            _section_wow_summary(
+                all_results, prev_results, baseline_rate, current_all_rate, all_delta
+            )
+        )
 
     # --- Executive Summary ---
-    lines.extend(_section_executive(
-        overall_status, s1_stats, s2_stats,
-        s1_delta, s2_delta, worst_regression, next_actions,
-    ))
+    lines.extend(
+        _section_executive(
+            overall_status,
+            s1_stats,
+            s2_stats,
+            s1_delta,
+            s2_delta,
+            worst_regression,
+            next_actions,
+        )
+    )
 
     # --- Key Metrics ---
-    lines.extend(_section_metrics(
-        total_runs, overall_pass_rate, s1_stats, s2_stats,
-        latency_p50, latency_p95, cost_per_task, failure_breakdown,
-    ))
+    lines.extend(
+        _section_metrics(
+            total_runs,
+            overall_pass_rate,
+            s1_stats,
+            s2_stats,
+            latency_p50,
+            latency_p95,
+            cost_per_task,
+            failure_breakdown,
+        )
+    )
 
     # --- Failure Type Delta ---
     if failure_type_delta:
@@ -87,6 +105,7 @@ def render_report(
 # Private section builders
 # ====================================================================
 
+
 def _section_wow_summary(
     all_results: List,
     prev_results: List,
@@ -101,11 +120,13 @@ def _section_wow_summary(
     ]
     s1_bl, s1_cur, s1_del = analyze.compute_pass_rate_delta(all_results, prev_results, "S1")
     s2_bl, s2_cur, s2_del = analyze.compute_pass_rate_delta(all_results, prev_results, "S2")
-    lines.extend([
-        f"- S1成功率: {s1_cur:.2f}% (前週: {s1_bl:.2f}%) → **{s1_del:+.2f}%**",
-        f"- S2成功率: {s2_cur:.2f}% (前週: {s2_bl:.2f}%) → **{s2_del:+.2f}%**",
-        "",
-    ])
+    lines.extend(
+        [
+            f"- S1成功率: {s1_cur:.2f}% (前週: {s1_bl:.2f}%) → **{s1_del:+.2f}%**",
+            f"- S2成功率: {s2_cur:.2f}% (前週: {s2_bl:.2f}%) → **{s2_del:+.2f}%**",
+            "",
+        ]
+    )
     return lines
 
 
@@ -209,13 +230,15 @@ def _section_top_regressions(regressions: List[Dict[str, Any]]) -> List[str]:
 def _section_individual_runs(reports: List) -> List[str]:
     lines = ["", "## Individual Runs", ""]
     for report in reports:
-        lines.extend([
-            f"### Run {report.run_id[:8]}",
-            f"- Timestamp: {report.timestamp.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"- Cases: {report.total_cases}",
-            f"- Passed: {report.passed_cases}",
-            f"- Failed: {report.failed_cases}",
-            f"- Pass Rate: {report.pass_rate:.2f}%",
-            "",
-        ])
+        lines.extend(
+            [
+                f"### Run {report.run_id[:8]}",
+                f"- Timestamp: {report.timestamp.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"- Cases: {report.total_cases}",
+                f"- Passed: {report.passed_cases}",
+                f"- Failed: {report.failed_cases}",
+                f"- Pass Rate: {report.pass_rate:.2f}%",
+                "",
+            ]
+        )
     return lines

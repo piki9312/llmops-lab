@@ -19,10 +19,9 @@ from agentops.config import (
     Rule,
     RuleMatch,
     Thresholds,
-    load_config,
     _rule_matches,
+    load_config,
 )
-
 
 # ========================================================================
 # Helpers
@@ -68,6 +67,7 @@ def _write(tmp_path: Path, content: str, name: str = ".agentreg.yml") -> Path:
 # ========================================================================
 # load_config
 # ========================================================================
+
 
 class TestLoadConfig:
     def test_explicit_path(self, tmp_path: Path):
@@ -121,6 +121,7 @@ class TestLoadConfig:
 # Thresholds defaults
 # ========================================================================
 
+
 class TestThresholds:
     def test_defaults(self):
         t = Thresholds()
@@ -132,6 +133,7 @@ class TestThresholds:
 # ========================================================================
 # Rule matching
 # ========================================================================
+
 
 class TestRuleMatching:
     def test_label_match(self):
@@ -171,6 +173,7 @@ class TestRuleMatching:
 # ========================================================================
 # resolve_thresholds
 # ========================================================================
+
 
 class TestResolveThresholds:
     def test_no_rules_returns_defaults(self):

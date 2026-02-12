@@ -51,12 +51,8 @@ class TestOpenAIProviderGenerate:
 
         # Mock OpenAI response
         mock_response = MagicMock()
-        mock_response.choices = [
-            MagicMock(message=MagicMock(content="Generated text response"))
-        ]
-        mock_response.usage = MagicMock(
-            prompt_tokens=10, completion_tokens=20, total_tokens=30
-        )
+        mock_response.choices = [MagicMock(message=MagicMock(content="Generated text response"))]
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
 
         provider.client.chat.completions.create = AsyncMock(return_value=mock_response)
 
@@ -77,9 +73,7 @@ class TestOpenAIProviderGenerate:
         mock_response.choices = [
             MagicMock(message=MagicMock(content='{"name": "test", "age": 25}'))
         ]
-        mock_response.usage = MagicMock(
-            prompt_tokens=15, completion_tokens=10, total_tokens=25
-        )
+        mock_response.usage = MagicMock(prompt_tokens=15, completion_tokens=10, total_tokens=25)
 
         provider.client.chat.completions.create = AsyncMock(return_value=mock_response)
 
@@ -97,12 +91,8 @@ class TestOpenAIProviderGenerate:
 
         # Mock invalid JSON response
         mock_response = MagicMock()
-        mock_response.choices = [
-            MagicMock(message=MagicMock(content="Not valid JSON{"))
-        ]
-        mock_response.usage = MagicMock(
-            prompt_tokens=10, completion_tokens=5, total_tokens=15
-        )
+        mock_response.choices = [MagicMock(message=MagicMock(content="Not valid JSON{"))]
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
 
         provider.client.chat.completions.create = AsyncMock(return_value=mock_response)
 

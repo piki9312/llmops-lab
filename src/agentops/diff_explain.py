@@ -25,10 +25,10 @@ import statistics
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-
 # ------------------------------------------------------------------
 # Data structures
 # ------------------------------------------------------------------
+
 
 @dataclass
 class FailureExplanation:
@@ -69,6 +69,7 @@ class FailureExplanation:
 # ------------------------------------------------------------------
 # Core logic
 # ------------------------------------------------------------------
+
 
 def explain_failures(
     current_results: List,
@@ -120,9 +121,7 @@ def explain_failures(
                 exp.signals.append("新規回帰: ベースラインでは全パス")
             else:
                 bl_fail_rate = sum(1 for r in bl_runs if not r.passed) / len(bl_runs)
-                exp.signals.append(
-                    f"継続失敗: ベースライン失敗率 {bl_fail_rate * 100:.0f}%"
-                )
+                exp.signals.append(f"継続失敗: ベースライン失敗率 {bl_fail_rate * 100:.0f}%")
         else:
             exp.signals.append("ベースラインデータなし（新規ケースまたは初回実行）")
 
@@ -133,9 +132,7 @@ def explain_failures(
         exp.baseline_failure_type = bl_ft
 
         if cur_ft and bl_ft and cur_ft != bl_ft:
-            exp.signals.append(
-                f"失敗タイプ変化: {bl_ft} → {cur_ft}"
-            )
+            exp.signals.append(f"失敗タイプ変化: {bl_ft} → {cur_ft}")
         elif cur_ft:
             exp.signals.append(f"失敗タイプ: {cur_ft}")
 
@@ -160,31 +157,26 @@ def explain_failures(
         if latency_ratio is not None:
             exp.latency_ratio = latency_ratio
             if latency_ratio >= latency_threshold:
-                exp.signals.append(
-                    f"レイテンシ急増: ベースライン比 {latency_ratio:.1f}×"
-                )
+                exp.signals.append(f"レイテンシ急増: ベースライン比 {latency_ratio:.1f}×")
 
         # --- 5. Token increase ---
         token_ratio = _token_ratio(fails, bl_runs)
         if token_ratio is not None:
             exp.token_ratio = token_ratio
             if token_ratio >= token_threshold:
-                exp.signals.append(
-                    f"トークン増加: ベースライン比 {token_ratio:.1f}×"
-                )
+                exp.signals.append(f"トークン増加: ベースライン比 {token_ratio:.1f}×")
 
         explanations.append(exp)
 
     # Sort: S1 first, then by number of signals descending
-    explanations.sort(
-        key=lambda e: (0 if e.severity == "S1" else 1, -len(e.signals))
-    )
+    explanations.sort(key=lambda e: (0 if e.severity == "S1" else 1, -len(e.signals)))
     return explanations
 
 
 # ------------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------------
+
 
 def _dominant_failure_type(results: List) -> Optional[str]:
     """Return the most common failure_type among failed results."""
@@ -290,6 +282,7 @@ def _latency_ratio(current_fails: List, baseline_runs: List) -> Optional[float]:
 
 def _token_ratio(current_fails: List, baseline_runs: List) -> Optional[float]:
     """Compute median current tokens / median baseline tokens."""
+
     def _tokens(r):
         direct = getattr(r, "total_tokens", 0)
         if direct:
@@ -314,6 +307,7 @@ def _token_ratio(current_fails: List, baseline_runs: List) -> Optional[float]:
 # ------------------------------------------------------------------
 # Markdown rendering
 # ------------------------------------------------------------------
+
 
 def render_failure_explanations(explanations: List[FailureExplanation]) -> str:
     """Render explanations as a Markdown section."""

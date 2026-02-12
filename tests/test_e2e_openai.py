@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import json
 import os
+
 import pytest
 
-from agentops.runner import RegressionRunner
 from agentops.models import TestCase
+from agentops.runner import RegressionRunner
 
 # Skip entire module if no API key
 pytestmark = pytest.mark.skipif(
@@ -42,11 +43,13 @@ class TestOpenAIE2E:
         """S1 case: model should return JSON matching the expected schema."""
         runner = RegressionRunner(use_llmops=True, llmops_config=OPENAI_CONFIG)
 
-        expected = json.dumps({
-            "location": "Tokyo",
-            "temperature": 15,
-            "condition": "cloudy",
-        })
+        expected = json.dumps(
+            {
+                "location": "Tokyo",
+                "temperature": 15,
+                "condition": "cloudy",
+            }
+        )
 
         case = TestCase(
             case_id="E2E_S1_001",
@@ -80,12 +83,14 @@ class TestOpenAIE2E:
         """S1 case: payment processing JSON contract."""
         runner = RegressionRunner(use_llmops=True, llmops_config=OPENAI_CONFIG)
 
-        expected = json.dumps({
-            "transaction_id": "tx_123",
-            "amount": 100.00,
-            "currency": "USD",
-            "status": "completed",
-        })
+        expected = json.dumps(
+            {
+                "transaction_id": "tx_123",
+                "amount": 100.00,
+                "currency": "USD",
+                "status": "completed",
+            }
+        )
 
         case = TestCase(
             case_id="E2E_S1_002",
@@ -172,10 +177,12 @@ class TestOpenAIE2E:
                 case_id="MINI_S1",
                 name="Auth JSON",
                 input_prompt="Authenticate user with token xyz123",
-                expected_output=json.dumps({
-                    "user_id": "usr_456",
-                    "authenticated": True,
-                }),
+                expected_output=json.dumps(
+                    {
+                        "user_id": "usr_456",
+                        "authenticated": True,
+                    }
+                ),
                 metadata={"severity": "S1", "category": "api"},
             ),
             TestCase(
@@ -194,8 +201,10 @@ class TestOpenAIE2E:
         print(f"  passed: {report.passed_cases}")
         print(f"  failed: {report.failed_cases}")
         for r in report.results:
-            print(f"  {r.case_id}: passed={r.passed} lat={r.latency_ms:.0f}ms "
-                  f"tokens={r.total_tokens} ${r.cost_usd:.6f}")
+            print(
+                f"  {r.case_id}: passed={r.passed} lat={r.latency_ms:.0f}ms "
+                f"tokens={r.total_tokens} ${r.cost_usd:.6f}"
+            )
 
         assert report.total_cases == 2
         # At least one should pass

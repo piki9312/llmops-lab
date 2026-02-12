@@ -90,9 +90,7 @@ class MockLLMProvider(LLMProvider):
         # Deterministic response based on message content hash
         message_text = "\n".join([m["content"] for m in messages])
         content_hash = hashlib.md5(message_text.encode()).hexdigest()[:8]
-        base_response = f"Mock response for {content_hash}: " + "Test output " * (
-            max_tokens // 20
-        )
+        base_response = f"Mock response for {content_hash}: " + "Test output " * (max_tokens // 20)
 
         # Try to generate JSON if schema specified
         json_output = None
@@ -159,18 +157,16 @@ class OpenAIProvider(LLMProvider):
         self.model_name = model_name
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
-            raise ValueError(
-                "OpenAI API key required: set OPENAI_API_KEY env var or pass api_key"
-            )
+            raise ValueError("OpenAI API key required: set OPENAI_API_KEY env var or pass api_key")
 
         # Lazy import to avoid dependency if not using OpenAI
         try:
             from openai import AsyncOpenAI
+
             self.client = AsyncOpenAI(api_key=self.api_key)
         except ImportError as e:
             raise ImportError(
-                "openai package required for OpenAIProvider. "
-                "Install with: pip install openai"
+                "openai package required for OpenAIProvider. " "Install with: pip install openai"
             ) from e
 
     async def generate(
@@ -221,6 +217,7 @@ class OpenAIProvider(LLMProvider):
             if schema:
                 try:
                     import json
+
                     json_output = json.loads(text)
                 except json.JSONDecodeError as e:
                     logging.warning(f"Failed to parse JSON from response: {e}")
@@ -297,9 +294,7 @@ class LLMClient:
                 return result
             except asyncio.TimeoutError:
                 last_error = {"error_type": "timeout", "text": "", "json": None}
-                logging.warning(
-                    f"Timeout on attempt {attempt + 1}/{self.max_retries + 1}"
-                )
+                logging.warning(f"Timeout on attempt {attempt + 1}/{self.max_retries + 1}")
             except Exception as e:
                 last_error = {
                     "error_type": "provider_error",

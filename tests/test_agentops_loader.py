@@ -2,8 +2,9 @@
 Tests for agentops.load_cases module.
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from agentops.load_cases import load_from_csv
 
@@ -18,7 +19,7 @@ def test_load_from_csv():
 def test_load_from_csv_with_real_file():
     """Test loading from the actual test cases file."""
     cases_file = Path("cases/agent_regression.csv")
-    
+
     if cases_file.exists():
         cases = load_from_csv(str(cases_file))
         assert len(cases) > 0

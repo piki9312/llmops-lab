@@ -29,7 +29,6 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from agentops.aggregate import normalize_severity
 
-
 _JSONL_DATE_RE = re.compile(r"^(\d{8})\.jsonl$")
 
 
@@ -222,7 +221,9 @@ def _render_summary(*, jsonl_path: Path, stats: GateStats) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="AgentReg S1-only CI gate")
-    parser.add_argument("--log-dir", default="runs/agentreg", help="Directory containing JSONL logs")
+    parser.add_argument(
+        "--log-dir", default="runs/agentreg", help="Directory containing JSONL logs"
+    )
     parser.add_argument(
         "--run-id",
         default=None,

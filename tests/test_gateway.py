@@ -14,7 +14,7 @@ from llmops.gateway import app
 @pytest.fixture
 def client(monkeypatch):
     """Provide FastAPI test client with mock provider.
-    
+
     Always forces mock provider so gateway tests are deterministic
     and don't require an API key.
     """
@@ -22,7 +22,9 @@ def client(monkeypatch):
     monkeypatch.setenv("LLM_MODEL", "gpt-4-mock")
     # Reimport the app so it picks up the patched env
     import importlib
+
     import llmops.gateway as gw
+
     importlib.reload(gw)
     return TestClient(gw.app)
 
@@ -32,7 +34,7 @@ class TestGenerateEndpoint:
 
     def test_generate_returns_200(self, client):
         """Test: POST /generate returns 200 OK.
-        
+
         入力：正常なリクエスト
         出力：status_code == 200
         副作用：runs/logs/gateway.jsonl に追記
@@ -47,7 +49,7 @@ class TestGenerateEndpoint:
 
     def test_generate_returns_request_id(self, client):
         """Test: response includes request_id.
-        
+
         入力：request_id なし（自動生成）
         出力：response.request_id は UUID形式
         副作用：なし
@@ -64,7 +66,7 @@ class TestGenerateEndpoint:
 
     def test_generate_with_schema(self, client):
         """Test: POST /generate with JSON schema.
-        
+
         入力：schema指定
         出力：json フィールドは dict
         副作用：runs/logs/gateway.jsonl に has_schema=true で記録
@@ -83,7 +85,7 @@ class TestGenerateEndpoint:
 
     def test_generate_includes_token_counts(self, client):
         """Test: response includes token usage.
-        
+
         入力：標準リクエスト
         出力：prompt_tokens, completion_tokens, total_tokens > 0
         副作用：なし
@@ -101,7 +103,7 @@ class TestGenerateEndpoint:
 
     def test_generate_includes_latency(self, client):
         """Test: response includes latency_ms.
-        
+
         入力：標準リクエスト
         出力：latency_ms >= 50 (MockProvider遅延)
         副作用：なし
@@ -118,7 +120,7 @@ class TestGenerateEndpoint:
 
     def test_generate_with_explicit_request_id(self, client):
         """Test: custom request_id is preserved.
-        
+
         入力：request_id 指定
         出力：response.request_id == 入力値
         副作用：runs/logs/gateway.jsonl に指定request_id で記録
@@ -136,7 +138,7 @@ class TestGenerateEndpoint:
 
     def test_jsonl_log_created(self, client, tmp_path):
         """Test: JSONL log file is created.
-        
+
         入力：POST /generate 実行
         出力：runs/logs/gateway.jsonl ファイル存在
         副作用：ログファイル作成
@@ -155,7 +157,7 @@ class TestGenerateEndpoint:
 
     def test_health_endpoint(self, client):
         """Test: GET /health works.
-        
+
         入力：なし
         出力：status: "ok"
         副作用：なし
@@ -173,7 +175,7 @@ class TestErrorHandling:
 
     def test_missing_messages(self, client):
         """Test: missing messages field.
-        
+
         入力：messages フィールド省略
         出力：status_code == 422 (validation error)
         副作用：なし
@@ -185,7 +187,7 @@ class TestErrorHandling:
 
     def test_invalid_schema_returns_error_type(self, client):
         """Test: invalid schema sets error_type.
-        
+
         入力：schema が dict でない値
         出力：error_type: "bad_json"
         副作用：runs/logs/gateway.jsonl に error_type 記録
@@ -200,6 +202,7 @@ class TestErrorHandling:
         data = response.json()
         # Note: Pydantic may reject this, or we handle in provider
         assert response.status_code in [200, 422]
+
 
 class TestPromptVersioning:
     """Test prompt versioning features."""
@@ -318,7 +321,7 @@ class TestRateLimiting:
             "messages": [{"role": "user", "content": "Test"}],
             "max_output_tokens": 64,
         }
-        
+
         # Should allow many requests without rate limiting
         for _ in range(20):
             response = client.post("/generate", json=payload)

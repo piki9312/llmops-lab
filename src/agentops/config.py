@@ -27,6 +27,7 @@ except ImportError:  # pragma: no cover
 # Data structures
 # ------------------------------------------------------------------
 
+
 @dataclass
 class Thresholds:
     """Gate thresholds (all values in percent 0-100)."""
@@ -148,6 +149,7 @@ def _parse(path: Path) -> AgentRegConfig:
 # Internal parsers
 # ------------------------------------------------------------------
 
+
 def _parse_thresholds(raw: Any) -> Thresholds:
     if not isinstance(raw, dict):
         return Thresholds()
@@ -184,6 +186,7 @@ def _parse_rule(raw: Any, *, defaults: Thresholds) -> Rule:
 # Rule matching
 # ------------------------------------------------------------------
 
+
 def _rule_matches(
     rule: Rule,
     *,
@@ -211,11 +214,7 @@ def _rule_matches(
 
     path_ok = True
     if m.paths:
-        path_ok = any(
-            fnmatch.fnmatch(f, pat)
-            for f in changed_files
-            for pat in m.paths
-        )
+        path_ok = any(fnmatch.fnmatch(f, pat) for f in changed_files for pat in m.paths)
 
     return label_ok and path_ok
 

@@ -18,22 +18,23 @@ import pytest
 
 from agentops.diff_explain import (
     FailureExplanation,
-    explain_failures,
-    render_failure_explanations,
-    _dominant_failure_type,
     _detect_schema_diff,
+    _dominant_failure_type,
     _latency_ratio,
     _token_ratio,
+    explain_failures,
+    render_failure_explanations,
 )
-
 
 # ========================================================================
 # Minimal stub for TestResult-like objects
 # ========================================================================
 
+
 @dataclass
 class _R:
     """Minimal result stub."""
+
     case_id: str = "TC001"
     passed: bool = True
     failure_type: Optional[str] = None
@@ -46,6 +47,7 @@ class _R:
 # ========================================================================
 # explain_failures
 # ========================================================================
+
 
 class TestExplainFailures:
     def test_new_regression(self):
@@ -105,6 +107,7 @@ class TestExplainFailures:
 # Schema diff (S1)
 # ========================================================================
 
+
 class TestSchemaDiff:
     def test_missing_keys(self):
         """Baseline has keys that current lacks."""
@@ -156,6 +159,7 @@ class TestSchemaDiff:
 # Latency / token ratio
 # ========================================================================
 
+
 class TestLatencyTokenRatio:
     def test_latency_spike(self):
         baseline = [_R(latency_ms=100.0)]
@@ -185,6 +189,7 @@ class TestLatencyTokenRatio:
 # Rendering
 # ========================================================================
 
+
 class TestRenderFailureExplanations:
     def test_empty(self):
         assert render_failure_explanations([]) == ""
@@ -192,7 +197,9 @@ class TestRenderFailureExplanations:
     def test_basic_render(self):
         exps = [
             FailureExplanation(
-                case_id="TC001", severity="S1", category="api",
+                case_id="TC001",
+                severity="S1",
+                category="api",
                 signals=["新規回帰: ベースラインでは全パス", "失敗タイプ: bad_json"],
                 current_failure_type="bad_json",
             )
@@ -206,6 +213,7 @@ class TestRenderFailureExplanations:
 # ========================================================================
 # _dominant_failure_type
 # ========================================================================
+
 
 class TestDominantFailureType:
     def test_single(self):

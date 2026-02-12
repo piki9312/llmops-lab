@@ -23,14 +23,15 @@ from agentops.flakiness import (
     render_flakiness_report,
 )
 
-
 # ========================================================================
 # Minimal stub
 # ========================================================================
 
+
 @dataclass
 class _R:
     """Minimal result stub."""
+
     case_id: str = "TC001"
     passed: bool = True
     failure_type: Optional[str] = None
@@ -43,6 +44,7 @@ class _R:
 # ========================================================================
 # compute_flakiness
 # ========================================================================
+
 
 class TestComputeFlakiness:
     def test_all_pass(self):
@@ -141,6 +143,7 @@ class TestComputeFlakiness:
 # flaky_cases convenience
 # ========================================================================
 
+
 class TestFlakyCases:
     def test_filters_only_flaky(self):
         results = [
@@ -157,6 +160,7 @@ class TestFlakyCases:
 # ========================================================================
 # render_flakiness_report
 # ========================================================================
+
 
 class TestRenderFlakinessReport:
     def test_empty(self):

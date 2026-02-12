@@ -2,11 +2,12 @@
 Tests for agentops.evaluator module.
 """
 
-import pytest
 from datetime import datetime
 
+import pytest
+
 from agentops.evaluator import Evaluator
-from agentops.models import TestResult, RegressionReport
+from agentops.models import RegressionReport, TestResult
 
 
 def test_calculate_accuracy():
@@ -18,7 +19,7 @@ def test_calculate_accuracy():
             passed=True,
             score=1.0,
             execution_time=0.1,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         ),
         TestResult(
             case_id="TC2",
@@ -26,10 +27,10 @@ def test_calculate_accuracy():
             passed=False,
             score=0.0,
             execution_time=0.1,
-            timestamp=datetime.now()
-        )
+            timestamp=datetime.now(),
+        ),
     ]
-    
+
     accuracy = Evaluator.calculate_accuracy(results)
     assert accuracy == 0.5
 
@@ -51,9 +52,9 @@ def test_generate_summary():
         completion_tokens=20,
         total_tokens=30,
         cost_usd=0.01,
-        cache_hit=False
+        cache_hit=False,
     )
-    
+
     result2 = TestResult(
         case_id="TC2",
         actual_output="output",
@@ -69,9 +70,9 @@ def test_generate_summary():
         completion_tokens=20,
         total_tokens=30,
         cost_usd=0.01,
-        cache_hit=False
+        cache_hit=False,
     )
-    
+
     report = RegressionReport(
         run_id="test-run",
         timestamp=datetime.now(),
@@ -79,11 +80,11 @@ def test_generate_summary():
         passed_cases=1,
         failed_cases=1,
         average_score=0.5,
-        results=[result1, result2]
+        results=[result1, result2],
     )
-    
+
     summary = Evaluator.generate_summary(report)
-    
+
     assert summary["run_id"] == "test-run"
     assert summary["total_cases"] == 2
     assert summary["passed_cases"] == 1
@@ -103,18 +104,30 @@ def test_generate_summary():
 def test_generate_summary_s1_s2_breakdown():
     """Test S1/S2 pass-rate breakdown in generate_summary."""
     s1_pass = TestResult(
-        case_id="TC_S1_01", actual_output="ok", passed=True,
-        score=1.0, execution_time=0.1, timestamp=datetime.now(),
+        case_id="TC_S1_01",
+        actual_output="ok",
+        passed=True,
+        score=1.0,
+        execution_time=0.1,
+        timestamp=datetime.now(),
         metrics={"severity": "S1"},
     )
     s1_fail = TestResult(
-        case_id="TC_S1_02", actual_output="ng", passed=False,
-        score=0.0, execution_time=0.1, timestamp=datetime.now(),
+        case_id="TC_S1_02",
+        actual_output="ng",
+        passed=False,
+        score=0.0,
+        execution_time=0.1,
+        timestamp=datetime.now(),
         metrics={"severity": "S1"},
     )
     s2_pass = TestResult(
-        case_id="TC_S2_01", actual_output="ok", passed=True,
-        score=1.0, execution_time=0.1, timestamp=datetime.now(),
+        case_id="TC_S2_01",
+        actual_output="ok",
+        passed=True,
+        score=1.0,
+        execution_time=0.1,
+        timestamp=datetime.now(),
         metrics={"severity": "S2"},
     )
 

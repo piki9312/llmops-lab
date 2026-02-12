@@ -1,9 +1,10 @@
 """Tests for prompt versioning and management."""
 
-import pytest
 from pathlib import Path
 
-from llmops.prompt_manager import PromptTemplate, PromptManager
+import pytest
+
+from llmops.prompt_manager import PromptManager, PromptTemplate
 
 
 class TestPromptTemplate:

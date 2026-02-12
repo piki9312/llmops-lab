@@ -11,53 +11,51 @@ and rendering are delegated to:
 * :mod:`agentops.render_md`  – Markdown assembly
 """
 
-from pathlib import Path
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Tuple, Any
 import json
-
-from .models import RegressionReport, TestResult, AgentRunRecord
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 # Delegated modules
 from . import aggregate as agg
-from . import analyze
-from . import render_md
+from . import analyze, render_md
+from .models import AgentRunRecord, RegressionReport, TestResult
 
 
 class WeeklyReporter:
     """Generates weekly regression reports."""
-    
+
     def __init__(self, reports_dir: str = "reports/agentreg"):
         """
         Initialize the weekly reporter.
-        
+
         Args:
             reports_dir: Directory where reports will be saved
         """
         self.reports_dir = Path(reports_dir)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
-    
+
     @staticmethod
     def load_from_jsonl(
         log_dir: str = "runs/agentreg",
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
     ) -> List[RegressionReport]:
         """
         Load test results from JSONL files and convert to RegressionReports.
-        
+
         Args:
             log_dir: Directory containing YYYYMMDD.jsonl files
             start_date: Start date (inclusive)
             end_date: End date (inclusive)
-            
+
         Returns:
             List of RegressionReports grouped by run_id
         """
         log_path = Path(log_dir)
         if not log_path.exists():
             return []
-        
+
         # Collect all records
         records: List[AgentRunRecord] = []
         for jsonl_file in sorted(log_path.glob("*.jsonl")):
@@ -65,16 +63,24 @@ class WeeklyReporter:
             try:
                 file_date = datetime.strptime(jsonl_file.stem, "%Y%m%d").replace(tzinfo=None)
                 # Compare dates without time components
-                start_date_cmp = start_date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None) if start_date else None
-                end_date_cmp = end_date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None) if end_date else None
-                
+                start_date_cmp = (
+                    start_date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+                    if start_date
+                    else None
+                )
+                end_date_cmp = (
+                    end_date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+                    if end_date
+                    else None
+                )
+
                 if start_date_cmp and file_date < start_date_cmp:
                     continue
                 if end_date_cmp and file_date > end_date_cmp:
                     continue
             except ValueError:
                 continue
-            
+
             # Load records from file
             with open(jsonl_file, "r", encoding="utf-8") as f:
                 for line in f:
@@ -82,20 +88,20 @@ class WeeklyReporter:
                         data = json.loads(line)
                         record = AgentRunRecord(**data)
                         records.append(record)
-        
+
         # Group by run_id
         runs: Dict[str, List[AgentRunRecord]] = {}
         for record in records:
             if record.run_id not in runs:
                 runs[record.run_id] = []
             runs[record.run_id].append(record)
-        
+
         # Convert to RegressionReports
         reports: List[RegressionReport] = []
         for run_id, run_records in runs.items():
             if not run_records:
                 continue
-            
+
             # Convert AgentRunRecords to TestResults
             results = [
                 TestResult(
@@ -115,15 +121,15 @@ class WeeklyReporter:
                         "model": rec.model,
                         "token_usage": rec.token_usage,
                         "cost_usd": rec.cost_usd,
-                    }
+                    },
                 )
                 for rec in run_records
             ]
-            
+
             passed_count = sum(1 for r in results if r.passed)
             total_count = len(results)
             avg_score = sum(r.score for r in results) / total_count if total_count else 0.0
-            
+
             report = RegressionReport(
                 run_id=run_id,
                 timestamp=run_records[0].timestamp,
@@ -131,12 +137,12 @@ class WeeklyReporter:
                 passed_cases=passed_count,
                 failed_cases=total_count - passed_count,
                 average_score=avg_score,
-                results=results
+                results=results,
             )
             reports.append(report)
-        
+
         return reports
-    
+
     def generate_report(
         self,
         reports: List[RegressionReport],
@@ -145,20 +151,20 @@ class WeeklyReporter:
     ) -> str:
         """
         Generate a weekly report from multiple regression reports.
-        
+
         Args:
             reports: List of regression reports from the week
             week_start: Start date of the week (defaults to current week)
             previous_week_reports: Optional baseline reports for regression analysis
-            
+
         Returns:
             Markdown formatted report string
         """
         if week_start is None:
             week_start = datetime.now() - timedelta(days=datetime.now().weekday())
-        
+
         week_end = week_start + timedelta(days=6)
-        
+
         # Flatten results
         all_results = [result for report in reports for result in report.results]
         prev_results = (
@@ -204,7 +210,8 @@ class WeeklyReporter:
 
         if prev_results:
             baseline_rate, current_all_rate, all_delta = analyze.compute_pass_rate_delta(
-                all_results, prev_results)
+                all_results, prev_results
+            )
             failure_type_delta = analyze.compute_failure_type_delta(all_results, prev_results)
             top_regressions = analyze.compute_top_regressions(all_results, prev_results)
         else:
@@ -227,8 +234,8 @@ class WeeklyReporter:
 
         # Render via render_md module
         return render_md.render_report(
-            week_start_str=week_start.strftime('%Y-%m-%d'),
-            week_end_str=week_end.strftime('%Y-%m-%d'),
+            week_start_str=week_start.strftime("%Y-%m-%d"),
+            week_end_str=week_end.strftime("%Y-%m-%d"),
             overall_status=status,
             s1_stats=s1_stats,
             s2_stats=s2_stats,
@@ -291,8 +298,12 @@ class WeeklyReporter:
         return analyze.worst_regression(results, prev_results)
 
     @staticmethod
-    def _overall_status(overall_pass_rate, s1_pass_rate, s1_total, s2_pass_rate, s2_total, worst_delta):
-        return analyze.overall_status(overall_pass_rate, s1_pass_rate, s1_total, s2_pass_rate, s2_total, worst_delta)
+    def _overall_status(
+        overall_pass_rate, s1_pass_rate, s1_total, s2_pass_rate, s2_total, worst_delta
+    ):
+        return analyze.overall_status(
+            overall_pass_rate, s1_pass_rate, s1_total, s2_pass_rate, s2_total, worst_delta
+        )
 
     def _next_actions(self, fb, worst_reg):
         return analyze.next_actions(fb, worst_reg)
@@ -312,22 +323,22 @@ class WeeklyReporter:
     @staticmethod
     def _compute_top_regressions(current_results, baseline_results, top_n=5):
         return analyze.compute_top_regressions(current_results, baseline_results, top_n)
-    
+
     def save_report(self, report_content: str, filename: Optional[str] = None) -> Path:
         """
         Save a report to disk.
-        
+
         Args:
             report_content: Markdown content of the report
             filename: Optional filename (defaults to timestamped name)
-            
+
         Returns:
             Path where the report was saved
         """
         if filename is None:
             filename = f"weekly_report_{datetime.now().strftime('%Y%m%d')}.md"
-        
+
         report_path = self.reports_dir / filename
-        report_path.write_text(report_content, encoding='utf-8')
-        
+        report_path.write_text(report_content, encoding="utf-8")
+
         return report_path

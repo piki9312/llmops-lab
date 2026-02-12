@@ -27,12 +27,8 @@ def compute_pass_rate_delta(
         ``(baseline_rate, current_rate, delta)`` as percentages.
     """
     if severity:
-        current_results = [
-            r for r in current_results if r.metrics.get("severity") == severity
-        ]
-        baseline_results = [
-            r for r in baseline_results if r.metrics.get("severity") == severity
-        ]
+        current_results = [r for r in current_results if r.metrics.get("severity") == severity]
+        baseline_results = [r for r in baseline_results if r.metrics.get("severity") == severity]
 
     if not current_results:
         return (0.0, 0.0, 0.0)
@@ -105,9 +101,7 @@ def compute_top_regressions(
         if delta <= 0:
             sev = case_info[case_id]["severity"]
             cat = case_info[case_id]["category"]
-            case_failures = [
-                r for r in current_results if r.case_id == case_id and not r.passed
-            ]
+            case_failures = [r for r in current_results if r.case_id == case_id and not r.passed]
             failure_types = [r.failure_type for r in case_failures if r.failure_type]
 
             regressions.append(
@@ -131,9 +125,7 @@ def compute_top_regressions(
     return regressions[:top_n]
 
 
-def worst_regression(
-    results: List, prev_results: List
-) -> Tuple[str, Optional[float]]:
+def worst_regression(results: List, prev_results: List) -> Tuple[str, Optional[float]]:
     """
     Find the single worst regression between two periods.
 
@@ -151,9 +143,7 @@ def worst_regression(
 
     curr = _rates(results)
     prev = _rates(prev_results)
-    deltas = [
-        (cid, curr[cid] - prev[cid]) for cid in curr if cid in prev
-    ]
+    deltas = [(cid, curr[cid] - prev[cid]) for cid in curr if cid in prev]
     if not deltas:
         return "N/A（比較対象なし）", None
 
@@ -172,12 +162,7 @@ def overall_status(
     """Return an emoji+label status string for the weekly report."""
     s1_ok = (s1_pass_rate >= 98) if s1_total > 0 else True
     s2_ok = (s2_pass_rate >= 98) if s2_total > 0 else True
-    if (
-        overall_pass_rate >= 98
-        and s1_ok
-        and s2_ok
-        and (worst_delta is None or worst_delta >= -1)
-    ):
+    if overall_pass_rate >= 98 and s1_ok and s2_ok and (worst_delta is None or worst_delta >= -1):
         return "✅安定"
     if (
         overall_pass_rate < 95

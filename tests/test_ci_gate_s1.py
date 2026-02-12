@@ -47,6 +47,7 @@ main = ci_gate_s1.main
 # Helpers
 # ========================================================================
 
+
 def _write_jsonl(path: Path, records: List[Dict[str, Any]]) -> None:
     """Write a list of dicts as JSONL."""
     with open(path, "w", encoding="utf-8") as f:
@@ -83,6 +84,7 @@ def _make_record(
 # _is_failed
 # ========================================================================
 
+
 class TestIsFailed:
     def test_passed_true(self):
         assert _is_failed({"passed": True}) is False
@@ -105,6 +107,7 @@ class TestIsFailed:
 # ========================================================================
 # _parse_ts
 # ========================================================================
+
 
 class TestParseTs:
     def test_iso_string(self):
@@ -129,6 +132,7 @@ class TestParseTs:
 # ========================================================================
 # _choose_latest_jsonl
 # ========================================================================
+
 
 class TestChooseLatestJsonl:
     def test_no_files(self, tmp_path: Path):
@@ -168,6 +172,7 @@ class TestChooseLatestJsonl:
 # _infer_severity  (uses imported normalize_severity)
 # ========================================================================
 
+
 class TestInferSeverity:
     def test_severity_field(self):
         assert _infer_severity({"severity": "S1"}) == "S1"
@@ -191,6 +196,7 @@ class TestInferSeverity:
 # ========================================================================
 # _pick_target_run_id
 # ========================================================================
+
 
 class TestPickTargetRunId:
     def test_single_run_id(self):
@@ -219,6 +225,7 @@ class TestPickTargetRunId:
 # ========================================================================
 # compute_gate_stats
 # ========================================================================
+
 
 class TestComputeGateStats:
     def _write_and_compute(
@@ -276,8 +283,7 @@ class TestComputeGateStats:
     def test_sample_limit(self, tmp_path: Path):
         """sample_s1_failures は --sample 上限を超えない."""
         records = [
-            _make_record(case_id=f"TC{i:03d}", severity="S1", passed=False)
-            for i in range(10)
+            _make_record(case_id=f"TC{i:03d}", severity="S1", passed=False) for i in range(10)
         ]
         jsonl = tmp_path / "20260212.jsonl"
         _write_jsonl(jsonl, records)
@@ -311,13 +317,17 @@ class TestComputeGateStats:
 # _render_summary
 # ========================================================================
 
+
 class TestRenderSummary:
     def test_pass_gate(self, tmp_path: Path):
         stats = GateStats(
             run_id=RUN_ID,
-            total=5, failed=0,
-            s1_total=3, s1_failed=0,
-            s2_total=2, s2_failed=0,
+            total=5,
+            failed=0,
+            s1_total=3,
+            s1_failed=0,
+            s2_total=2,
+            s2_failed=0,
             sample_s1_failures=[],
         )
         md = _render_summary(jsonl_path=tmp_path / "test.jsonl", stats=stats)
@@ -327,9 +337,12 @@ class TestRenderSummary:
     def test_fail_gate(self, tmp_path: Path):
         stats = GateStats(
             run_id=RUN_ID,
-            total=5, failed=2,
-            s1_total=3, s1_failed=2,
-            s2_total=2, s2_failed=0,
+            total=5,
+            failed=2,
+            s1_total=3,
+            s1_failed=2,
+            s2_total=2,
+            s2_failed=0,
             sample_s1_failures=[("TC001", "timeout"), ("TC005", "wrong_answer")],
         )
         md = _render_summary(jsonl_path=tmp_path / "test.jsonl", stats=stats)
@@ -340,9 +353,12 @@ class TestRenderSummary:
     def test_contains_key_metrics(self, tmp_path: Path):
         stats = GateStats(
             run_id=RUN_ID,
-            total=10, failed=3,
-            s1_total=5, s1_failed=1,
-            s2_total=5, s2_failed=2,
+            total=10,
+            failed=3,
+            s1_total=5,
+            s1_failed=1,
+            s2_total=5,
+            s2_failed=2,
             sample_s1_failures=[("TC004", "quality_fail")],
         )
         md = _render_summary(jsonl_path=tmp_path / "test.jsonl", stats=stats)
@@ -355,6 +371,7 @@ class TestRenderSummary:
 # main() – integration tests
 # ========================================================================
 
+
 class TestMainIntegration:
     """Test main() exit codes via monkeypatch."""
 
@@ -365,51 +382,101 @@ class TestMainIntegration:
         return log_dir
 
     def test_exit_0_when_s1_all_pass(self, tmp_path: Path, monkeypatch):
-        log_dir = self._setup_logs(tmp_path, [
-            _make_record(case_id="TC001", severity="S1", passed=True),
-            _make_record(case_id="TC002", severity="S2", passed=False),
-        ])
-        monkeypatch.setattr(sys, "argv", [
-            "ci_gate_s1.py", "--log-dir", str(log_dir), "--run-id", RUN_ID,
-        ])
+        log_dir = self._setup_logs(
+            tmp_path,
+            [
+                _make_record(case_id="TC001", severity="S1", passed=True),
+                _make_record(case_id="TC002", severity="S2", passed=False),
+            ],
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "ci_gate_s1.py",
+                "--log-dir",
+                str(log_dir),
+                "--run-id",
+                RUN_ID,
+            ],
+        )
         assert main() == 0
 
     def test_exit_1_when_s1_failure(self, tmp_path: Path, monkeypatch):
-        log_dir = self._setup_logs(tmp_path, [
-            _make_record(case_id="TC001", severity="S1", passed=False),
-        ])
-        monkeypatch.setattr(sys, "argv", [
-            "ci_gate_s1.py", "--log-dir", str(log_dir), "--run-id", RUN_ID,
-        ])
+        log_dir = self._setup_logs(
+            tmp_path,
+            [
+                _make_record(case_id="TC001", severity="S1", passed=False),
+            ],
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "ci_gate_s1.py",
+                "--log-dir",
+                str(log_dir),
+                "--run-id",
+                RUN_ID,
+            ],
+        )
         assert main() == 1
 
     def test_exit_1_when_no_jsonl(self, tmp_path: Path, monkeypatch):
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
-        monkeypatch.setattr(sys, "argv", [
-            "ci_gate_s1.py", "--log-dir", str(empty_dir),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "ci_gate_s1.py",
+                "--log-dir",
+                str(empty_dir),
+            ],
+        )
         assert main() == 1
 
     def test_exit_1_when_run_id_not_found(self, tmp_path: Path, monkeypatch):
-        log_dir = self._setup_logs(tmp_path, [
-            _make_record(run_id="other-run"),
-        ])
-        monkeypatch.setattr(sys, "argv", [
-            "ci_gate_s1.py", "--log-dir", str(log_dir), "--run-id", "nonexistent",
-        ])
+        log_dir = self._setup_logs(
+            tmp_path,
+            [
+                _make_record(run_id="other-run"),
+            ],
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "ci_gate_s1.py",
+                "--log-dir",
+                str(log_dir),
+                "--run-id",
+                "nonexistent",
+            ],
+        )
         assert main() == 1
 
     def test_write_summary(self, tmp_path: Path, monkeypatch):
-        log_dir = self._setup_logs(tmp_path, [
-            _make_record(case_id="TC001", severity="S1", passed=True),
-        ])
+        log_dir = self._setup_logs(
+            tmp_path,
+            [
+                _make_record(case_id="TC001", severity="S1", passed=True),
+            ],
+        )
         summary_file = tmp_path / "summary.md"
         monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
-        monkeypatch.setattr(sys, "argv", [
-            "ci_gate_s1.py", "--log-dir", str(log_dir),
-            "--run-id", RUN_ID, "--write-summary",
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "ci_gate_s1.py",
+                "--log-dir",
+                str(log_dir),
+                "--run-id",
+                RUN_ID,
+                "--write-summary",
+            ],
+        )
         assert main() == 0
         content = summary_file.read_text(encoding="utf-8")
         assert "✅ PASS" in content
@@ -417,12 +484,25 @@ class TestMainIntegration:
 
     def test_auto_detect_run_id(self, tmp_path: Path, monkeypatch):
         """--run-id を省略してもタイムスタンプから最新が選ばれる."""
-        log_dir = self._setup_logs(tmp_path, [
-            _make_record(run_id="old-run", severity="S1", passed=False, timestamp="2026-02-10T00:00:00Z"),
-            _make_record(run_id="new-run", severity="S1", passed=True, timestamp="2026-02-12T00:00:00Z"),
-        ])
-        monkeypatch.setattr(sys, "argv", [
-            "ci_gate_s1.py", "--log-dir", str(log_dir),
-        ])
+        log_dir = self._setup_logs(
+            tmp_path,
+            [
+                _make_record(
+                    run_id="old-run", severity="S1", passed=False, timestamp="2026-02-10T00:00:00Z"
+                ),
+                _make_record(
+                    run_id="new-run", severity="S1", passed=True, timestamp="2026-02-12T00:00:00Z"
+                ),
+            ],
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "ci_gate_s1.py",
+                "--log-dir",
+                str(log_dir),
+            ],
+        )
         # new-run は S1 pass なので exit 0
         assert main() == 0

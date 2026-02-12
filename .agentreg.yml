@@ -1,0 +1,32 @@
+# AgentReg Configuration
+# =====================
+# This file controls gate-check thresholds and per-context rule overrides.
+# Place at repository root. CLI flag --config can override the path.
+
+# ---- Default thresholds (applied when no rule matches) ----------------
+thresholds:
+  s1_pass_rate: 100.0      # S1 (critical) cases must all pass
+  overall_pass_rate: 80.0   # Minimum overall pass rate
+  top_n: 5                  # Number of top regressions to show
+
+# ---- Rule overrides ---------------------------------------------------
+# Each rule has a `match` block and a `thresholds` block.
+# First matching rule wins (evaluated top to bottom).
+# Only the specified thresholds are overridden; others inherit defaults.
+rules:
+  - name: hotfix
+    match:
+      labels: ["hotfix", "emergency"]
+    thresholds:
+      s1_pass_rate: 100.0
+      overall_pass_rate: 95.0
+
+  - name: api-changes
+    match:
+      paths: ["src/api/**", "src/agentops/**"]
+    thresholds:
+      overall_pass_rate: 90.0
+
+# ---- Case-level settings (augment CSV columns) -----------------------
+# owner_fallback: default owner when CSV `owner` column is empty
+owner_fallback: platform-team

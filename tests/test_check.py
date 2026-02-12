@@ -384,3 +384,229 @@ class TestCheckGateIntegration:
         assert rc == 1
         content = out_file.read_text(encoding="utf-8")
         assert "❌ FAIL" in content
+
+
+# ========================================================================
+# P1: Config integration
+# ========================================================================
+
+class TestConfigIntegration:
+    """Tests for YAML config driving thresholds in run_check / check_gate."""
+
+    def _write_config(self, tmp_path: Path, content: str) -> Path:
+        p = tmp_path / ".agentreg.yml"
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def test_config_thresholds_apply(self, tmp_path: Path):
+        """Config with overall_pass_rate=50 makes 1/2 pass → gate pass."""
+        from agentops.config import load_config
+
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(case_id="TC001", severity="S2", passed=True),
+            _make_record(case_id="TC002", severity="S2", passed=False),
+        ])
+        cfg_path = self._write_config(tmp_path, """\
+thresholds:
+  s1_pass_rate: 100
+  overall_pass_rate: 50
+""")
+        cfg = load_config(str(cfg_path))
+        result = run_check(log_dir=str(log_dir), days=1, config=cfg)
+        assert result.gate_passed is True
+
+    def test_cli_overrides_config(self, tmp_path: Path):
+        """Explicit --overall-threshold=90 overrides config's 50."""
+        from agentops.config import load_config
+
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(case_id="TC001", severity="S2", passed=True),
+            _make_record(case_id="TC002", severity="S2", passed=False),
+        ])
+        cfg_path = self._write_config(tmp_path, """\
+thresholds:
+  overall_pass_rate: 50
+""")
+        cfg = load_config(str(cfg_path))
+        result = run_check(log_dir=str(log_dir), days=1, config=cfg, overall_threshold=90.0)
+        assert result.gate_passed is False
+
+    def test_label_rule_override(self, tmp_path: Path):
+        """Hotfix label rule raises overall threshold → gate fails."""
+        from agentops.config import load_config
+
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(case_id="TC001", severity="S2", passed=True),
+            _make_record(case_id="TC002", severity="S2", passed=False),
+        ])
+        cfg_path = self._write_config(tmp_path, """\
+thresholds:
+  overall_pass_rate: 40
+rules:
+  - name: hotfix
+    match:
+      labels: ["hotfix"]
+    thresholds:
+      overall_pass_rate: 90
+""")
+        cfg = load_config(str(cfg_path))
+        # Without label → 50% >= 40% → pass
+        result_no_label = run_check(log_dir=str(log_dir), days=1, config=cfg)
+        assert result_no_label.gate_passed is True
+
+        # With hotfix label → 50% < 90% → fail
+        result_hotfix = run_check(
+            log_dir=str(log_dir), days=1, config=cfg, labels=["hotfix"],
+        )
+        assert result_hotfix.gate_passed is False
+
+
+# ========================================================================
+# P1: Per-case min_pass_rate
+# ========================================================================
+
+class TestCaseMinPassRate:
+    """Tests for per-case min_pass_rate from CSV."""
+
+    def _write_cases(self, tmp_path: Path, rows: list) -> Path:
+        import csv
+        p = tmp_path / "cases.csv"
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["case_id", "name", "input_prompt",
+                                                    "expected_output", "category",
+                                                    "severity", "owner", "tags", "min_pass_rate"])
+            writer.writeheader()
+            writer.writerows(rows)
+        return p
+
+    def test_case_threshold_pass(self, tmp_path: Path):
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(case_id="TC001", severity="S1", passed=True),
+        ])
+        cases_file = self._write_cases(tmp_path, [
+            {"case_id": "TC001", "name": "Test", "input_prompt": "Hi",
+             "expected_output": "", "category": "api", "severity": "S1",
+             "owner": "team-a", "tags": "core", "min_pass_rate": "100"},
+        ])
+        result = run_check(log_dir=str(log_dir), days=1, cases_file=str(cases_file))
+        assert result.gate_passed is True
+        assert len(result.case_thresholds) == 1
+        assert result.case_thresholds[0].passed is True
+
+    def test_case_threshold_fail(self, tmp_path: Path):
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(case_id="TC001", severity="S1", passed=False),
+        ])
+        cases_file = self._write_cases(tmp_path, [
+            {"case_id": "TC001", "name": "Test", "input_prompt": "Hi",
+             "expected_output": "", "category": "api", "severity": "S1",
+             "owner": "team-a", "tags": "core", "min_pass_rate": "100"},
+        ])
+        result = run_check(
+            log_dir=str(log_dir), days=1,
+            cases_file=str(cases_file), s1_threshold=0.0, overall_threshold=0.0,
+        )
+        # Gate fails due to per-case threshold even though S1/overall thresholds are 0
+        assert result.gate_passed is False
+        assert len(result.case_thresholds) == 1
+        assert result.case_thresholds[0].passed is False
+
+    def test_case_without_min_rate_is_skipped(self, tmp_path: Path):
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(case_id="TC001", severity="S2", passed=False),
+        ])
+        cases_file = self._write_cases(tmp_path, [
+            {"case_id": "TC001", "name": "Test", "input_prompt": "Hi",
+             "expected_output": "", "category": "api", "severity": "S2",
+             "owner": "", "tags": "", "min_pass_rate": ""},
+        ])
+        result = run_check(
+            log_dir=str(log_dir), days=1,
+            cases_file=str(cases_file), s1_threshold=0.0, overall_threshold=0.0,
+        )
+        assert len(result.case_thresholds) == 0
+        assert result.gate_passed is True
+
+    def test_no_cases_file_no_case_thresholds(self, tmp_path: Path):
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(case_id="TC001", severity="S1", passed=True),
+        ])
+        result = run_check(log_dir=str(log_dir), days=1)
+        assert result.case_thresholds == []
+
+    def test_render_includes_case_violations(self, tmp_path: Path):
+        """render_check_summary includes case threshold violations section."""
+        cr = CheckResult(
+            current_runs=1, baseline_runs=0,
+            overall_rate=100.0,
+            s1_rate=100.0, s1_passed=1, s1_total=1,
+            s2_rate=0.0, s2_passed=0, s2_total=0,
+            thresholds=[],
+            case_thresholds=[
+                ThresholdResult(
+                    name="Case TC042", threshold=100.0, actual=0.0,
+                    passed=False, detail="min_pass_rate=100%",
+                ),
+            ],
+        )
+        md = render_check_summary(cr)
+        assert "Case Threshold Violations" in md
+        assert "TC042" in md
+
+
+# ========================================================================
+# P1: check_gate CLI integration with config
+# ========================================================================
+
+class TestCheckGateConfigCLI:
+    def test_config_path_passed(self, tmp_path: Path):
+        """--config is forwarded to run_check."""
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(severity="S2", passed=True),
+            _make_record(severity="S2", passed=False, case_id="TC002"),
+        ])
+        cfg_path = tmp_path / ".agentreg.yml"
+        cfg_path.write_text("thresholds:\n  overall_pass_rate: 40\n", encoding="utf-8")
+        rc = check_gate(log_dir=str(log_dir), days=1, config_path=str(cfg_path))
+        assert rc == 0  # 50% >= 40%
+
+    def test_labels_comma_separated(self, tmp_path: Path):
+        """--labels hotfix,urgent parses into list."""
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(severity="S2", passed=True),
+        ])
+        cfg_path = tmp_path / ".agentreg.yml"
+        cfg_path.write_text("""\
+thresholds:
+  overall_pass_rate: 50
+rules:
+  - name: strict
+    match:
+      labels: ["hotfix"]
+    thresholds:
+      overall_pass_rate: 200
+""", encoding="utf-8")
+        # With hotfix label → threshold becomes 200% → always fails
+        rc = check_gate(
+            log_dir=str(log_dir), days=1,
+            config_path=str(cfg_path), labels="hotfix,urgent",
+        )
+        assert rc == 1
+
+    def test_cases_file_passed(self, tmp_path: Path):
+        """--cases-file triggers per-case checks."""
+        import csv
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(case_id="TC001", severity="S1", passed=True),
+        ])
+        cases_file = tmp_path / "cases.csv"
+        with open(cases_file, "w", encoding="utf-8", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=["case_id", "name", "input_prompt",
+                                               "expected_output", "category",
+                                               "severity", "min_pass_rate"])
+            w.writeheader()
+            w.writerow({"case_id": "TC001", "name": "Test", "input_prompt": "Hi",
+                        "expected_output": "", "category": "api", "severity": "S1",
+                        "min_pass_rate": "100"})
+        rc = check_gate(log_dir=str(log_dir), days=1, cases_file=str(cases_file))
+        assert rc == 0

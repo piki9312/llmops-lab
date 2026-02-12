@@ -94,11 +94,63 @@
 P0（CIプロダクトとして成立）
 - ✅ `agentops check`（比較→exit code）
 - ✅ ベースラインパターン（main artifact + `--baseline-dir`）
-- 失敗時のPRコメント（要点だけ）
+- ✅ 失敗時のPRコメント（要点だけ）
 
 P1（使われる）
-- しきい値設定（YAML）と、PRラベル/ディレクトリでルール切替
-- ケースに ownership（team）/タグ/最小許容率を持たせる
+- ✅ しきい値設定（YAML `.agentreg.yml`）と、PRラベル/ディレクトリでルール切替
+- ✅ ケースに ownership（team）/タグ/最小許容率（`min_pass_rate`）を持たせる
+
+### P1 詳細: YAML設定 & ケース属性
+
+#### `.agentreg.yml` スキーマ
+
+```yaml
+thresholds:          # デフォルトしきい値
+  s1_pass_rate: 100
+  overall_pass_rate: 80
+  top_n: 5
+
+rules:               # PRラベル/変更ファイルによるルール切替（先頭一致）
+  - name: hotfix
+    match:
+      labels: ["hotfix", "emergency"]
+    thresholds:
+      overall_pass_rate: 95
+
+  - name: api-changes
+    match:
+      paths: ["src/api/**"]
+    thresholds:
+      overall_pass_rate: 90
+
+owner_fallback: platform-team
+```
+
+#### しきい値の優先順位
+
+| 優先度 | ソース | 例 |
+|--------|--------|----|
+| 1（最高） | CLIフラグ | `--s1-threshold 95` |
+| 2 | YAML ルール（labels/paths） | `rules[].thresholds` |
+| 3 | YAML デフォルト | `thresholds` |
+| 4（最低） | ビルトイン | S1=100%, overall=80% |
+
+#### CSV 拡張カラム（後方互換）
+
+| カラム | 型 | 説明 |
+|--------|----|------|
+| `owner` | string | ケース担当チーム (e.g. `api-team`) |
+| `tags` | string | セミコロン区切りタグ (e.g. `core;payment`) |
+| `min_pass_rate` | float | ケースごとの最小許容率 (0-100) |
+
+#### 新 CLI フラグ（`agentops check`）
+
+| フラグ | 説明 |
+|--------|------|
+| `--config PATH` | `.agentreg.yml` パス（デフォルト: リポジトリルート自動検出） |
+| `--labels L1,L2` | PRラベル（カンマ区切り、ルールマッチ用） |
+| `--changed-files F1,F2` | 変更ファイル（カンマ区切り、ルールマッチ用） |
+| `--cases-file PATH` | CSV パス（per-case `min_pass_rate` チェック用） |
 
 P2（強い）
 - 失敗差分の説明（json schema不一致、tool呼び出しの変化、token増など）

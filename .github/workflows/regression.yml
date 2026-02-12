@@ -125,14 +125,24 @@ jobs:
             BASELINE_FLAG="--baseline-days ${BASELINE_DAYS}"
           fi
 
+          # Collect PR labels (comma-separated) for rule matching
+          LABEL_FLAG=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            LABELS=$(echo '${{ toJSON(github.event.pull_request.labels.*.name) }}' | jq -r 'join(",")')
+            if [ -n "$LABELS" ] && [ "$LABELS" != "null" ]; then
+              LABEL_FLAG="--labels ${LABELS}"
+            fi
+          fi
+
           # Run gate; capture exit code but don't fail yet (we comment first)
           set +e
           python -m agentops check \
             --log-dir "$LOG_DIR" \
             --days 1 \
             ${BASELINE_FLAG} \
-            --s1-threshold 100 \
-            --overall-threshold 80 \
+            --config .agentreg.yml \
+            --cases-file "$CASES_FILE" \
+            ${LABEL_FLAG} \
             --write-summary \
             --output-file gate_summary.md -v
           GATE_RC=$?

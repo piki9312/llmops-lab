@@ -18,6 +18,7 @@ from .evaluator import Evaluator
 from .report_weekly import WeeklyReporter
 from .models import AgentRunRecord
 from .check import run_check, render_check_summary
+from .config import load_config
 
 
 def run_regression(
@@ -255,23 +256,42 @@ def check_gate(
     days: int = 1,
     baseline_days: int = 7,
     baseline_dir: Optional[str] = None,
-    s1_threshold: float = 100.0,
-    overall_threshold: float = 80.0,
+    s1_threshold: Optional[float] = None,
+    overall_threshold: Optional[float] = None,
     write_summary: bool = False,
     output_file: Optional[str] = None,
+    config_path: Optional[str] = None,
+    labels: Optional[str] = None,
+    changed_files: Optional[str] = None,
+    cases_file: Optional[str] = None,
     verbose: bool = False,
 ) -> int:
     """Compare current period against baseline and enforce thresholds.
+
+    Thresholds are resolved in priority order:
+    1. Explicit CLI flags (``--s1-threshold``, ``--overall-threshold``)
+    2. YAML config rule overrides matched by ``--labels`` / ``--changed-files``
+    3. YAML config defaults
+    4. Built-in defaults (S1=100%, overall=80%)
 
     Returns:
         Exit code (0 = all thresholds met, 1 = violation or no data).
     """
     try:
+        # Load config (YAML or built-in defaults)
+        cfg = load_config(config_path)
+
+        # Parse comma-separated labels / changed_files
+        label_list = [l.strip() for l in labels.split(",") if l.strip()] if labels else []
+        file_list = [f.strip() for f in changed_files.split(",") if f.strip()] if changed_files else []
+
         if verbose:
             bl = f"baseline_dir={baseline_dir}" if baseline_dir else f"baseline_days={baseline_days}"
+            cfg_desc = config_path or "(auto-detect)"
             print(
                 f"Gate check: log_dir={log_dir} days={days} {bl} "
-                f"s1_threshold={s1_threshold}% overall_threshold={overall_threshold}%"
+                f"config={cfg_desc} labels={label_list} "
+                f"s1_threshold={s1_threshold} overall_threshold={overall_threshold}"
             )
 
         result = run_check(
@@ -281,6 +301,10 @@ def check_gate(
             baseline_dir=baseline_dir,
             s1_threshold=s1_threshold,
             overall_threshold=overall_threshold,
+            config=cfg,
+            labels=label_list,
+            changed_files=file_list,
+            cases_file=cases_file,
         )
 
         if result.current_runs == 0:
@@ -293,8 +317,11 @@ def check_gate(
         print(f"Gate: {icon} {'PASS' if result.gate_passed else 'FAIL'}")
         print(f"Current runs : {result.current_runs}")
         print(f"Baseline runs: {result.baseline_runs}")
-        print(f"Overall : {result.overall_rate:.2f}% (threshold {overall_threshold}%)")
-        print(f"S1      : {result.s1_rate:.2f}% ({result.s1_passed}/{result.s1_total}, threshold {s1_threshold}%)")
+        # Determine effective thresholds from result for display
+        eff_s1 = next((t.threshold for t in result.thresholds if t.name == "S1 pass rate"), 100.0)
+        eff_overall = next((t.threshold for t in result.thresholds if t.name == "Overall pass rate"), 80.0)
+        print(f"Overall : {result.overall_rate:.2f}% (threshold {eff_overall}%)")
+        print(f"S1      : {result.s1_rate:.2f}% ({result.s1_passed}/{result.s1_total}, threshold {eff_s1}%)")
         print(f"S2      : {result.s2_rate:.2f}% ({result.s2_passed}/{result.s2_total})")
 
         for t in result.thresholds:
@@ -310,6 +337,13 @@ def check_gate(
                     f"{reg['baseline_rate']:.0f}% \u2192 {reg['current_rate']:.0f}% "
                     f"(\u0394 {reg['delta']:+.1f}%) \u2014 {ft}"
                 )
+
+        # Per-case min_pass_rate violations
+        failed_cases = [t for t in result.case_thresholds if not t.passed]
+        if failed_cases:
+            print(f"\nCase threshold violations:")
+            for t in failed_cases:
+                print(f"  \u274c {t.name}: {t.actual:.1f}% < {t.threshold:.0f}% ({t.detail})")
 
         # Markdown for GitHub Job Summary & file output
         md = render_check_summary(result)
@@ -441,14 +475,35 @@ def main():
     check_parser.add_argument(
         "--s1-threshold",
         type=float,
-        default=100.0,
-        help="S1 pass rate threshold in %% (default: 100)"
+        default=None,
+        help="S1 pass rate threshold in %% (overrides config; default from .agentreg.yml or 100)"
     )
     check_parser.add_argument(
         "--overall-threshold",
         type=float,
-        default=80.0,
-        help="Overall pass rate threshold in %% (default: 80)"
+        default=None,
+        help="Overall pass rate threshold in %% (overrides config; default from .agentreg.yml or 80)"
+    )
+    check_parser.add_argument(
+        "--config",
+        dest="config_path",
+        default=None,
+        help="Path to .agentreg.yml config (default: auto-detect in repo root)"
+    )
+    check_parser.add_argument(
+        "--labels",
+        default=None,
+        help="Comma-separated PR labels for rule matching (e.g. hotfix,urgent)"
+    )
+    check_parser.add_argument(
+        "--changed-files",
+        default=None,
+        help="Comma-separated changed file paths for rule matching"
+    )
+    check_parser.add_argument(
+        "--cases-file",
+        default=None,
+        help="Path to CSV cases file for per-case min_pass_rate checks"
     )
     check_parser.add_argument(
         "--write-summary",
@@ -486,6 +541,10 @@ def main():
             overall_threshold=args.overall_threshold,
             write_summary=args.write_summary,
             output_file=args.output_file,
+            config_path=args.config_path,
+            labels=args.labels,
+            changed_files=args.changed_files,
+            cases_file=args.cases_file,
             verbose=args.verbose,
         ))
     else:

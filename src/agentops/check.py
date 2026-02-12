@@ -22,6 +22,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from .aggregate import severity_pass_rate, compute_case_pass_rates
 from .analyze import compute_pass_rate_delta, compute_top_regressions
 from .config import AgentRegConfig, Thresholds, load_config
+from .diff_explain import FailureExplanation, explain_failures, render_failure_explanations
+from .flakiness import CaseStability, compute_flakiness, render_flakiness_report
 from .report_weekly import WeeklyReporter
 
 
@@ -56,6 +58,8 @@ class CheckResult:
     thresholds: List[ThresholdResult] = field(default_factory=list)
     top_regressions: List[Dict[str, Any]] = field(default_factory=list)
     case_thresholds: List[ThresholdResult] = field(default_factory=list)
+    failure_explanations: List[FailureExplanation] = field(default_factory=list)
+    flaky_cases: List[CaseStability] = field(default_factory=list)
 
     @property
     def gate_passed(self) -> bool:
@@ -201,6 +205,17 @@ def run_check(
                 detail=f"min_pass_rate={min_rate}%",
             ))
 
+    # --- P2: Failure explanations -----------------------------------
+    failure_exps: List[FailureExplanation] = []
+    if current_results and baseline_results:
+        failure_exps = explain_failures(current_results, baseline_results)
+
+    # --- P2: Flakiness detection (when repeated runs exist) ----------
+    flaky: List[CaseStability] = []
+    if current_results:
+        all_stability = compute_flakiness(current_results, min_runs=2)
+        flaky = [s for s in all_stability if s.is_flaky]
+
     return CheckResult(
         current_runs=len(current_reports),
         baseline_runs=len(baseline_reports),
@@ -214,6 +229,8 @@ def run_check(
         thresholds=thresholds,
         top_regressions=top_regs,
         case_thresholds=case_thresholds,
+        failure_explanations=failure_exps,
+        flaky_cases=flaky,
     )
 
 
@@ -296,5 +313,15 @@ def render_check_summary(result: CheckResult) -> str:
             lines.append(
                 f"- **{t.name}**: {t.actual:.1f}% < {t.threshold:.0f}% ({t.detail})"
             )
+
+    # P2: Failure explanations
+    if result.failure_explanations:
+        lines.append("")
+        lines.append(render_failure_explanations(result.failure_explanations))
+
+    # P2: Flaky cases
+    if result.flaky_cases:
+        lines.append("")
+        lines.append(render_flakiness_report(result.flaky_cases, flaky_only=True))
 
     return "\n".join(lines) + "\n"

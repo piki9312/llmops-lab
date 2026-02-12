@@ -83,6 +83,7 @@ def run_daily(
     log_dir: str = "runs/agentreg",
     verbose: bool = False,
     run_id: Optional[str] = None,
+    repeat: int = 1,
 ) -> int:
     """
     Run daily regression tests and save results to JSONL.
@@ -91,6 +92,9 @@ def run_daily(
         cases_file: Path to CSV file with test cases
         log_dir: Directory for JSONL logs (default: runs/agentreg)
         verbose: Enable verbose output
+        repeat: Number of times to run the full suite (default: 1).
+                When > 1, each iteration uses a distinct run_id suffix
+                so per-case flakiness can be detected.
         
     Returns:
         Exit code (0 for success, 1 for failure)
@@ -103,55 +107,67 @@ def run_daily(
         if verbose:
             print(f"Loaded {len(cases)} test cases")
         
-        # Generate run ID (or use provided one for CI reproducibility)
-        if run_id is None:
-            run_id = str(uuid.uuid4())
-        
-        # Run tests
-        if verbose:
-            print(f"Running regression tests (run_id: {run_id})...")
-        runner = RegressionRunner(use_llmops=True)
-        report = runner.run_all(cases, run_id=run_id)
-        
+        # Generate base run ID
+        base_run_id = run_id or str(uuid.uuid4())
+
         # Prepare JSONL log file
         log_path = Path(log_dir)
         log_path.mkdir(parents=True, exist_ok=True)
         today = datetime.now(timezone.utc).strftime("%Y%m%d")
         jsonl_file = log_path / f"{today}.jsonl"
+
+        any_failure = False
+        total_records = 0
+
+        for iteration in range(1, repeat + 1):
+            iter_run_id = f"{base_run_id}" if repeat == 1 else f"{base_run_id}-r{iteration}"
+
+            if verbose:
+                label = f" (iteration {iteration}/{repeat})" if repeat > 1 else ""
+                print(f"Running regression tests{label} (run_id: {iter_run_id})...")
+
+            runner = RegressionRunner(use_llmops=True)
+            report = runner.run_all(cases, run_id=iter_run_id)
+
+            # Append to JSONL
+            records_written = 0
+            with open(jsonl_file, "a", encoding="utf-8") as f:
+                for test_case, test_result in zip(cases, report.results):
+                    record = AgentRunRecord.from_test_result(
+                        result=test_result,
+                        run_id=iter_run_id,
+                        test_case=test_case
+                    )
+                    f.write(record.model_dump_json() + "\n")
+                    records_written += 1
+            total_records += records_written
+
+            if verbose:
+                print(f"  Saved {records_written} records (iteration {iteration})")
+
+            if report.failed_cases > 0:
+                any_failure = True
+
+            # Show summary for last (or only) iteration
+            if iteration == repeat:
+                summary = Evaluator.generate_summary(report)
+                print(f"\n=== Daily Regression Results ===")
+                print(f"Date: {today}")
+                print(f"Run ID: {base_run_id}")
+                if repeat > 1:
+                    print(f"Repeat: {repeat} iterations")
+                print(f"Total Cases: {summary['total_cases']}")
+                print(f"Passed: {summary['passed_cases']}")
+                print(f"Failed: {summary['failed_cases']}")
+                print(f"Pass Rate: {summary['pass_rate_percent']:.2f}%")
+                print(f"S1 Pass Rate: {summary['pass_rate_s1']}  ({summary['s1_passed']}/{summary['s1_total']})")
+                print(f"S2 Pass Rate: {summary['pass_rate_s2']}  ({summary['s2_passed']}/{summary['s2_total']})")
+                print(f"Average Latency: {summary['avg_latency_ms']:.2f} ms")
+                print(f"Total Cost: ${summary['total_cost_usd']:.6f}")
+                print(f"Total Records: {total_records}")
+                print(f"\nLog: {jsonl_file}")
         
-        # Convert results to AgentRunRecords and append to JSONL
-        records_written = 0
-        with open(jsonl_file, "a", encoding="utf-8") as f:
-            for test_case, test_result in zip(cases, report.results):
-                record = AgentRunRecord.from_test_result(
-                    result=test_result,
-                    run_id=run_id,
-                    test_case=test_case
-                )
-                f.write(record.model_dump_json() + "\n")
-                records_written += 1
-        
-        if verbose:
-            print(f"Saved {records_written} records to {jsonl_file}")
-        
-        # Display summary
-        summary = Evaluator.generate_summary(report)
-        print(f"\n=== Daily Regression Results ===")
-        print(f"Date: {today}")
-        print(f"Run ID: {run_id}")
-        print(f"Total Cases: {summary['total_cases']}")
-        print(f"Passed: {summary['passed_cases']}")
-        print(f"Failed: {summary['failed_cases']}")
-        print(f"Pass Rate: {summary['pass_rate_percent']:.2f}%")
-        print(f"S1 Pass Rate: {summary['pass_rate_s1']}  ({summary['s1_passed']}/{summary['s1_total']})")
-        print(f"S2 Pass Rate: {summary['pass_rate_s2']}  ({summary['s2_passed']}/{summary['s2_total']})")
-        print(f"Average Latency: {summary['avg_latency_ms']:.2f} ms")
-        print(f"Total Cost: ${summary['total_cost_usd']:.6f}")
-        print(f"\nLog: {jsonl_file}")
-        
-        # Note: this is a generic gate (any failure). CI can apply stricter gating
-        # (e.g. S1-only) by parsing JSONL for the given run_id.
-        return 0 if report.failed_cases == 0 else 1
+        return 0 if not any_failure else 1
         
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -345,6 +361,22 @@ def check_gate(
             for t in failed_cases:
                 print(f"  \u274c {t.name}: {t.actual:.1f}% < {t.threshold:.0f}% ({t.detail})")
 
+        # P2: Failure explanations
+        if result.failure_explanations:
+            print(f"\nFailure explanations ({len(result.failure_explanations)} cases):")
+            for e in result.failure_explanations[:10]:
+                ft = e.current_failure_type or "\u2014"
+                print(f"  {e.case_id} [{e.severity}] ({ft}): {e.explanation}")
+
+        # P2: Flaky cases
+        if result.flaky_cases:
+            print(f"\n\U0001f3b2 Flaky cases ({len(result.flaky_cases)}):")
+            for s in result.flaky_cases:
+                print(
+                    f"  {s.case_id} [{s.severity}] "
+                    f"{s.pass_rate:.0f}% ({s.passed_runs}/{s.total_runs})"
+                )
+
         # Markdown for GitHub Job Summary & file output
         md = render_check_summary(result)
         if write_summary:
@@ -409,6 +441,12 @@ def main():
         "--run-id",
         default=None,
         help="Optional run_id (useful for CI correlation)"
+    )
+    daily_parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help="Run the full suite N times for flakiness detection (default: 1)"
     )
     daily_parser.add_argument(
         "-v", "--verbose",
@@ -526,7 +564,7 @@ def main():
     if args.command == "run":
         sys.exit(run_regression(args.cases_file, args.output_dir, args.verbose))
     elif args.command == "run-daily":
-        sys.exit(run_daily(args.cases_file, args.log_dir, args.verbose, run_id=args.run_id))
+        sys.exit(run_daily(args.cases_file, args.log_dir, args.verbose, run_id=args.run_id, repeat=args.repeat))
     elif args.command == "report":
         sys.exit(generate_weekly_report(
             args.log_dir, args.days, args.baseline_days, args.output, args.verbose

@@ -75,7 +75,7 @@ jobs:
         run: |
           mkdir -p "$LOG_DIR"
           python -m agentops run-daily "$CASES_FILE" \
-            --log-dir "$LOG_DIR" --run-id "$RUN_ID" -v || true
+            --log-dir "$LOG_DIR" --run-id "$RUN_ID" --repeat 3 -v || true
 
       - name: Generate report (Markdown)
         if: always()

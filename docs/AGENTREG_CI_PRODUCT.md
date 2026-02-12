@@ -153,5 +153,46 @@ owner_fallback: platform-team
 | `--cases-file PATH` | CSV パス（per-case `min_pass_rate` チェック用） |
 
 P2（強い）
-- 失敗差分の説明（json schema不一致、tool呼び出しの変化、token増など）
-- 反復実行（n回）での安定性評価（揺らぎを検知）
+- ✅ 失敗差分の説明（json schema不一致、tool呼び出しの変化、token増など）
+- ✅ 反復実行（n回）での安定性評価（揺らぎを検知）
+
+### P2 詳細: 失敗差分の説明 & Flakiness 検知
+
+#### 失敗差分の説明 (`diff_explain.py`)
+
+ベースラインと比較して各失敗ケースに **なぜ回帰したか** のシグナルを自動付与:
+
+| シグナル | 検出方法 |
+|----------|----------|
+| 新規回帰 | ベースラインで全パス → 今回失敗 |
+| 継続失敗 | ベースラインでも失敗済み（失敗率表示） |
+| 失敗タイプ変化 | dominant failure_type が baseline → current で異なる |
+| JSON schema 不一致 | S1 ケースの出力を JSON パースし、キーの差分・型変化を検出 |
+| レイテンシ急増 | current median / baseline median ≥ 2× |
+| トークン増加 | current median / baseline median ≥ 1.5× |
+
+出力は `CheckResult.failure_explanations` に格納され、PR コメントの Markdown テーブルに自動挿入。
+
+#### 反復実行 & Flakiness 検知 (`flakiness.py`)
+
+`run-daily --repeat N` で同一ケースを **N 回** 実行し、安定性を評価:
+
+```bash
+# CI では 3 回反復実行
+python -m agentops run-daily cases.csv --repeat 3
+```
+
+| 指標 | 説明 |
+|------|------|
+| `is_flaky` | 0 < fail_rate < 100%（パスと失敗が混在） |
+| `pass_rate` | パス率（%） |
+| `failure_types` | 出現した失敗タイプ一覧 |
+| `latency_cv` | レイテンシの変動係数（CV）— 高いほど不安定 |
+
+Flaky ケースは **ゲートをブロックしない**（情報提供のみ）が、PR コメントに 🎲 アイコン付きで表示。
+
+#### 新 CLI フラグ（`agentops run-daily`）
+
+| フラグ | 説明 |
+|--------|------|
+| `--repeat N` | 同一ケースを N 回反復実行（デフォルト: 1） |

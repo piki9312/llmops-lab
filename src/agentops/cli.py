@@ -258,6 +258,7 @@ def check_gate(
     s1_threshold: float = 100.0,
     overall_threshold: float = 80.0,
     write_summary: bool = False,
+    output_file: Optional[str] = None,
     verbose: bool = False,
 ) -> int:
     """Compare current period against baseline and enforce thresholds.
@@ -310,14 +311,20 @@ def check_gate(
                     f"(\u0394 {reg['delta']:+.1f}%) \u2014 {ft}"
                 )
 
-        # Markdown for GitHub Job Summary
+        # Markdown for GitHub Job Summary & file output
+        md = render_check_summary(result)
         if write_summary:
             import os as _os
-            md = render_check_summary(result)
             summary_path = _os.environ.get("GITHUB_STEP_SUMMARY")
             if summary_path:
                 Path(summary_path).write_text(md, encoding="utf-8")
             print(f"\n{md}")
+
+        if output_file:
+            Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+            Path(output_file).write_text(md, encoding="utf-8")
+            if verbose:
+                print(f"Gate summary written to {output_file}")
 
         return 0 if result.gate_passed else 1
 
@@ -449,6 +456,11 @@ def main():
         help="Write markdown to $GITHUB_STEP_SUMMARY"
     )
     check_parser.add_argument(
+        "--output-file",
+        default=None,
+        help="Write gate summary Markdown to this file (for PR comments)"
+    )
+    check_parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Enable verbose output"
@@ -473,6 +485,7 @@ def main():
             s1_threshold=args.s1_threshold,
             overall_threshold=args.overall_threshold,
             write_summary=args.write_summary,
+            output_file=args.output_file,
             verbose=args.verbose,
         ))
     else:

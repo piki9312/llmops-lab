@@ -360,3 +360,27 @@ class TestCheckGateIntegration:
         check_gate(log_dir=str(log_dir), days=1, verbose=True)
         captured = capsys.readouterr()
         assert "Gate check:" in captured.out
+
+    def test_output_file_written(self, tmp_path: Path):
+        """--output-file writes Markdown to disk for PR comments."""
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(severity="S1", passed=True),
+            _make_record(severity="S2", passed=True, case_id="TC002"),
+        ])
+        out_file = tmp_path / "gate_summary.md"
+        rc = check_gate(log_dir=str(log_dir), days=1, output_file=str(out_file))
+        assert rc == 0
+        content = out_file.read_text(encoding="utf-8")
+        assert "AgentReg Gate Check" in content
+        assert "✅ PASS" in content
+
+    def test_output_file_on_failure(self, tmp_path: Path):
+        """--output-file is written even when gate fails."""
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(severity="S1", passed=False, failure_type="bad_json"),
+        ])
+        out_file = tmp_path / "sub" / "gate_summary.md"
+        rc = check_gate(log_dir=str(log_dir), days=1, output_file=str(out_file))
+        assert rc == 1
+        content = out_file.read_text(encoding="utf-8")
+        assert "❌ FAIL" in content

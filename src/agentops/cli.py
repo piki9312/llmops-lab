@@ -18,6 +18,7 @@ from .evaluator import Evaluator
 from .report_weekly import WeeklyReporter
 from .models import AgentRunRecord
 from .check import run_check, render_check_summary
+from .config import load_config
 
 
 def run_regression(
@@ -82,6 +83,7 @@ def run_daily(
     log_dir: str = "runs/agentreg",
     verbose: bool = False,
     run_id: Optional[str] = None,
+    repeat: int = 1,
 ) -> int:
     """
     Run daily regression tests and save results to JSONL.
@@ -90,6 +92,9 @@ def run_daily(
         cases_file: Path to CSV file with test cases
         log_dir: Directory for JSONL logs (default: runs/agentreg)
         verbose: Enable verbose output
+        repeat: Number of times to run the full suite (default: 1).
+                When > 1, each iteration uses a distinct run_id suffix
+                so per-case flakiness can be detected.
         
     Returns:
         Exit code (0 for success, 1 for failure)
@@ -102,55 +107,67 @@ def run_daily(
         if verbose:
             print(f"Loaded {len(cases)} test cases")
         
-        # Generate run ID (or use provided one for CI reproducibility)
-        if run_id is None:
-            run_id = str(uuid.uuid4())
-        
-        # Run tests
-        if verbose:
-            print(f"Running regression tests (run_id: {run_id})...")
-        runner = RegressionRunner(use_llmops=True)
-        report = runner.run_all(cases, run_id=run_id)
-        
+        # Generate base run ID
+        base_run_id = run_id or str(uuid.uuid4())
+
         # Prepare JSONL log file
         log_path = Path(log_dir)
         log_path.mkdir(parents=True, exist_ok=True)
         today = datetime.now(timezone.utc).strftime("%Y%m%d")
         jsonl_file = log_path / f"{today}.jsonl"
+
+        any_failure = False
+        total_records = 0
+
+        for iteration in range(1, repeat + 1):
+            iter_run_id = f"{base_run_id}" if repeat == 1 else f"{base_run_id}-r{iteration}"
+
+            if verbose:
+                label = f" (iteration {iteration}/{repeat})" if repeat > 1 else ""
+                print(f"Running regression tests{label} (run_id: {iter_run_id})...")
+
+            runner = RegressionRunner(use_llmops=True)
+            report = runner.run_all(cases, run_id=iter_run_id)
+
+            # Append to JSONL
+            records_written = 0
+            with open(jsonl_file, "a", encoding="utf-8") as f:
+                for test_case, test_result in zip(cases, report.results):
+                    record = AgentRunRecord.from_test_result(
+                        result=test_result,
+                        run_id=iter_run_id,
+                        test_case=test_case
+                    )
+                    f.write(record.model_dump_json() + "\n")
+                    records_written += 1
+            total_records += records_written
+
+            if verbose:
+                print(f"  Saved {records_written} records (iteration {iteration})")
+
+            if report.failed_cases > 0:
+                any_failure = True
+
+            # Show summary for last (or only) iteration
+            if iteration == repeat:
+                summary = Evaluator.generate_summary(report)
+                print(f"\n=== Daily Regression Results ===")
+                print(f"Date: {today}")
+                print(f"Run ID: {base_run_id}")
+                if repeat > 1:
+                    print(f"Repeat: {repeat} iterations")
+                print(f"Total Cases: {summary['total_cases']}")
+                print(f"Passed: {summary['passed_cases']}")
+                print(f"Failed: {summary['failed_cases']}")
+                print(f"Pass Rate: {summary['pass_rate_percent']:.2f}%")
+                print(f"S1 Pass Rate: {summary['pass_rate_s1']}  ({summary['s1_passed']}/{summary['s1_total']})")
+                print(f"S2 Pass Rate: {summary['pass_rate_s2']}  ({summary['s2_passed']}/{summary['s2_total']})")
+                print(f"Average Latency: {summary['avg_latency_ms']:.2f} ms")
+                print(f"Total Cost: ${summary['total_cost_usd']:.6f}")
+                print(f"Total Records: {total_records}")
+                print(f"\nLog: {jsonl_file}")
         
-        # Convert results to AgentRunRecords and append to JSONL
-        records_written = 0
-        with open(jsonl_file, "a", encoding="utf-8") as f:
-            for test_case, test_result in zip(cases, report.results):
-                record = AgentRunRecord.from_test_result(
-                    result=test_result,
-                    run_id=run_id,
-                    test_case=test_case
-                )
-                f.write(record.model_dump_json() + "\n")
-                records_written += 1
-        
-        if verbose:
-            print(f"Saved {records_written} records to {jsonl_file}")
-        
-        # Display summary
-        summary = Evaluator.generate_summary(report)
-        print(f"\n=== Daily Regression Results ===")
-        print(f"Date: {today}")
-        print(f"Run ID: {run_id}")
-        print(f"Total Cases: {summary['total_cases']}")
-        print(f"Passed: {summary['passed_cases']}")
-        print(f"Failed: {summary['failed_cases']}")
-        print(f"Pass Rate: {summary['pass_rate_percent']:.2f}%")
-        print(f"S1 Pass Rate: {summary['pass_rate_s1']}  ({summary['s1_passed']}/{summary['s1_total']})")
-        print(f"S2 Pass Rate: {summary['pass_rate_s2']}  ({summary['s2_passed']}/{summary['s2_total']})")
-        print(f"Average Latency: {summary['avg_latency_ms']:.2f} ms")
-        print(f"Total Cost: ${summary['total_cost_usd']:.6f}")
-        print(f"\nLog: {jsonl_file}")
-        
-        # Note: this is a generic gate (any failure). CI can apply stricter gating
-        # (e.g. S1-only) by parsing JSONL for the given run_id.
-        return 0 if report.failed_cases == 0 else 1
+        return 0 if not any_failure else 1
         
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -254,30 +271,56 @@ def check_gate(
     log_dir: str = "runs/agentreg",
     days: int = 1,
     baseline_days: int = 7,
-    s1_threshold: float = 100.0,
-    overall_threshold: float = 80.0,
+    baseline_dir: Optional[str] = None,
+    s1_threshold: Optional[float] = None,
+    overall_threshold: Optional[float] = None,
     write_summary: bool = False,
+    output_file: Optional[str] = None,
+    config_path: Optional[str] = None,
+    labels: Optional[str] = None,
+    changed_files: Optional[str] = None,
+    cases_file: Optional[str] = None,
     verbose: bool = False,
 ) -> int:
     """Compare current period against baseline and enforce thresholds.
+
+    Thresholds are resolved in priority order:
+    1. Explicit CLI flags (``--s1-threshold``, ``--overall-threshold``)
+    2. YAML config rule overrides matched by ``--labels`` / ``--changed-files``
+    3. YAML config defaults
+    4. Built-in defaults (S1=100%, overall=80%)
 
     Returns:
         Exit code (0 = all thresholds met, 1 = violation or no data).
     """
     try:
+        # Load config (YAML or built-in defaults)
+        cfg = load_config(config_path)
+
+        # Parse comma-separated labels / changed_files
+        label_list = [l.strip() for l in labels.split(",") if l.strip()] if labels else []
+        file_list = [f.strip() for f in changed_files.split(",") if f.strip()] if changed_files else []
+
         if verbose:
+            bl = f"baseline_dir={baseline_dir}" if baseline_dir else f"baseline_days={baseline_days}"
+            cfg_desc = config_path or "(auto-detect)"
             print(
-                f"Gate check: log_dir={log_dir} days={days} "
-                f"baseline_days={baseline_days} "
-                f"s1_threshold={s1_threshold}% overall_threshold={overall_threshold}%"
+                f"Gate check: log_dir={log_dir} days={days} {bl} "
+                f"config={cfg_desc} labels={label_list} "
+                f"s1_threshold={s1_threshold} overall_threshold={overall_threshold}"
             )
 
         result = run_check(
             log_dir=log_dir,
             days=days,
             baseline_days=baseline_days,
+            baseline_dir=baseline_dir,
             s1_threshold=s1_threshold,
             overall_threshold=overall_threshold,
+            config=cfg,
+            labels=label_list,
+            changed_files=file_list,
+            cases_file=cases_file,
         )
 
         if result.current_runs == 0:
@@ -290,8 +333,11 @@ def check_gate(
         print(f"Gate: {icon} {'PASS' if result.gate_passed else 'FAIL'}")
         print(f"Current runs : {result.current_runs}")
         print(f"Baseline runs: {result.baseline_runs}")
-        print(f"Overall : {result.overall_rate:.2f}% (threshold {overall_threshold}%)")
-        print(f"S1      : {result.s1_rate:.2f}% ({result.s1_passed}/{result.s1_total}, threshold {s1_threshold}%)")
+        # Determine effective thresholds from result for display
+        eff_s1 = next((t.threshold for t in result.thresholds if t.name == "S1 pass rate"), 100.0)
+        eff_overall = next((t.threshold for t in result.thresholds if t.name == "Overall pass rate"), 80.0)
+        print(f"Overall : {result.overall_rate:.2f}% (threshold {eff_overall}%)")
+        print(f"S1      : {result.s1_rate:.2f}% ({result.s1_passed}/{result.s1_total}, threshold {eff_s1}%)")
         print(f"S2      : {result.s2_rate:.2f}% ({result.s2_passed}/{result.s2_total})")
 
         for t in result.thresholds:
@@ -308,14 +354,43 @@ def check_gate(
                     f"(\u0394 {reg['delta']:+.1f}%) \u2014 {ft}"
                 )
 
-        # Markdown for GitHub Job Summary
+        # Per-case min_pass_rate violations
+        failed_cases = [t for t in result.case_thresholds if not t.passed]
+        if failed_cases:
+            print(f"\nCase threshold violations:")
+            for t in failed_cases:
+                print(f"  \u274c {t.name}: {t.actual:.1f}% < {t.threshold:.0f}% ({t.detail})")
+
+        # P2: Failure explanations
+        if result.failure_explanations:
+            print(f"\nFailure explanations ({len(result.failure_explanations)} cases):")
+            for e in result.failure_explanations[:10]:
+                ft = e.current_failure_type or "\u2014"
+                print(f"  {e.case_id} [{e.severity}] ({ft}): {e.explanation}")
+
+        # P2: Flaky cases
+        if result.flaky_cases:
+            print(f"\n\U0001f3b2 Flaky cases ({len(result.flaky_cases)}):")
+            for s in result.flaky_cases:
+                print(
+                    f"  {s.case_id} [{s.severity}] "
+                    f"{s.pass_rate:.0f}% ({s.passed_runs}/{s.total_runs})"
+                )
+
+        # Markdown for GitHub Job Summary & file output
+        md = render_check_summary(result)
         if write_summary:
             import os as _os
-            md = render_check_summary(result)
             summary_path = _os.environ.get("GITHUB_STEP_SUMMARY")
             if summary_path:
                 Path(summary_path).write_text(md, encoding="utf-8")
             print(f"\n{md}")
+
+        if output_file:
+            Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+            Path(output_file).write_text(md, encoding="utf-8")
+            if verbose:
+                print(f"Gate summary written to {output_file}")
 
         return 0 if result.gate_passed else 1
 
@@ -366,6 +441,12 @@ def main():
         "--run-id",
         default=None,
         help="Optional run_id (useful for CI correlation)"
+    )
+    daily_parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help="Run the full suite N times for flakiness detection (default: 1)"
     )
     daily_parser.add_argument(
         "-v", "--verbose",
@@ -424,21 +505,53 @@ def main():
         help="Days for baseline period (default: 7)"
     )
     check_parser.add_argument(
+        "--baseline-dir",
+        default=None,
+        help="Directory containing baseline JSONL (e.g. downloaded artifact from main). "
+             "When set, --baseline-days is ignored."
+    )
+    check_parser.add_argument(
         "--s1-threshold",
         type=float,
-        default=100.0,
-        help="S1 pass rate threshold in %% (default: 100)"
+        default=None,
+        help="S1 pass rate threshold in %% (overrides config; default from .agentreg.yml or 100)"
     )
     check_parser.add_argument(
         "--overall-threshold",
         type=float,
-        default=80.0,
-        help="Overall pass rate threshold in %% (default: 80)"
+        default=None,
+        help="Overall pass rate threshold in %% (overrides config; default from .agentreg.yml or 80)"
+    )
+    check_parser.add_argument(
+        "--config",
+        dest="config_path",
+        default=None,
+        help="Path to .agentreg.yml config (default: auto-detect in repo root)"
+    )
+    check_parser.add_argument(
+        "--labels",
+        default=None,
+        help="Comma-separated PR labels for rule matching (e.g. hotfix,urgent)"
+    )
+    check_parser.add_argument(
+        "--changed-files",
+        default=None,
+        help="Comma-separated changed file paths for rule matching"
+    )
+    check_parser.add_argument(
+        "--cases-file",
+        default=None,
+        help="Path to CSV cases file for per-case min_pass_rate checks"
     )
     check_parser.add_argument(
         "--write-summary",
         action="store_true",
         help="Write markdown to $GITHUB_STEP_SUMMARY"
+    )
+    check_parser.add_argument(
+        "--output-file",
+        default=None,
+        help="Write gate summary Markdown to this file (for PR comments)"
     )
     check_parser.add_argument(
         "-v", "--verbose",
@@ -451,7 +564,7 @@ def main():
     if args.command == "run":
         sys.exit(run_regression(args.cases_file, args.output_dir, args.verbose))
     elif args.command == "run-daily":
-        sys.exit(run_daily(args.cases_file, args.log_dir, args.verbose, run_id=args.run_id))
+        sys.exit(run_daily(args.cases_file, args.log_dir, args.verbose, run_id=args.run_id, repeat=args.repeat))
     elif args.command == "report":
         sys.exit(generate_weekly_report(
             args.log_dir, args.days, args.baseline_days, args.output, args.verbose
@@ -461,9 +574,15 @@ def main():
             log_dir=args.log_dir,
             days=args.days,
             baseline_days=args.baseline_days,
+            baseline_dir=args.baseline_dir,
             s1_threshold=args.s1_threshold,
             overall_threshold=args.overall_threshold,
             write_summary=args.write_summary,
+            output_file=args.output_file,
+            config_path=args.config_path,
+            labels=args.labels,
+            changed_files=args.changed_files,
+            cases_file=args.cases_file,
             verbose=args.verbose,
         ))
     else:

@@ -29,11 +29,25 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
+
+# ------------------------------------------------------------------
+# Common env shared by all steps
+# ------------------------------------------------------------------
+env:
+  CASES_FILE: ${{ github.event.inputs.cases_file || 'cases/agent_regression.csv' }}
+  LOG_DIR: ${{ github.event.inputs.log_dir || 'runs/agentreg' }}
+  BASELINE_ARTIFACT: agentreg-baseline
 
 jobs:
+  # ================================================================
+  # 1. Run regression tests (shared by all triggers)
+  # ================================================================
   agentreg:
-    name: Run AgentReg and gate on S1
+    name: Run AgentReg
     runs-on: ubuntu-latest
+    outputs:
+      run_id: ${{ steps.runid.outputs.run_id }}
 
     steps:
       - name: Checkout
@@ -59,41 +73,129 @@ jobs:
 
       - name: Run regression (JSONL append)
         run: |
-          CASES_FILE="${{ github.event.inputs.cases_file || 'cases/agent_regression.csv' }}"
-          LOG_DIR="${{ github.event.inputs.log_dir || 'runs/agentreg' }}"
-
           mkdir -p "$LOG_DIR"
-          # NOTE: run-daily returns non-zero when *any* failures exist.
-          # We don't fail here; we gate strictly on S1 via JSONL parsing.
-          python -m agentops run-daily "$CASES_FILE" --log-dir "$LOG_DIR" --run-id "$RUN_ID" -v || true
+          python -m agentops run-daily "$CASES_FILE" \
+            --log-dir "$LOG_DIR" --run-id "$RUN_ID" --repeat 3 -v || true
 
       - name: Generate report (Markdown)
         if: always()
         run: |
-          LOG_DIR="${{ github.event.inputs.log_dir || 'runs/agentreg' }}"
           DAYS="${{ github.event.inputs.report_days || '7' }}"
           BASELINE_DAYS="${{ github.event.inputs.baseline_days || '7' }}"
-
           mkdir -p reports
-          python -m agentops report --log-dir "$LOG_DIR" --days "$DAYS" --baseline-days "$BASELINE_DAYS" -o "reports/regression_${GITHUB_SHA}.md" -v || true
+          python -m agentops report \
+            --log-dir "$LOG_DIR" --days "$DAYS" --baseline-days "$BASELINE_DAYS" \
+            -o "reports/regression_${GITHUB_SHA}.md" -v || true
 
+      # -- Upload JSONL + report as the per-run artifact ---------------
       - name: Upload artifacts (JSONL + report)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: agentreg-${{ github.ref_name }}-${{ steps.runid.outputs.run_id }}
+          name: agentreg-run-${{ steps.runid.outputs.run_id }}
           path: |
             runs/**
             reports/**
           retention-days: 30
 
-      - name: Gate: check thresholds (S1 + overall)
+      # -- Download baseline from main (PR only) -----------------------
+      - name: Download baseline artifact (PR only)
+        if: github.event_name == 'pull_request'
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          name: ${{ env.BASELINE_ARTIFACT }}
+          workflow: regression.yml
+          branch: main
+          path: baseline
+          if_no_artifact_found: warn
+        continue-on-error: true
+
+      # -- Gate: check thresholds (S1 + overall) -----------------------
+      - name: Gate check
+        id: gate
         run: |
-          LOG_DIR="${{ github.event.inputs.log_dir || 'runs/agentreg' }}"
+          BASELINE_DAYS="${{ github.event.inputs.baseline_days || '7' }}"
+
+          # If baseline directory exists (downloaded artifact), use it
+          if [ -d "baseline/runs/agentreg" ] && [ "$(ls -A baseline/runs/agentreg/*.jsonl 2>/dev/null)" ]; then
+            echo "📦 Using baseline from main artifact"
+            BASELINE_FLAG="--baseline-dir baseline/runs/agentreg"
+          else
+            echo "📅 Using trailing ${BASELINE_DAYS}-day window as baseline"
+            BASELINE_FLAG="--baseline-days ${BASELINE_DAYS}"
+          fi
+
+          # Collect PR labels (comma-separated) for rule matching
+          LABEL_FLAG=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            LABELS=$(echo '${{ toJSON(github.event.pull_request.labels.*.name) }}' | jq -r 'join(",")')
+            if [ -n "$LABELS" ] && [ "$LABELS" != "null" ]; then
+              LABEL_FLAG="--labels ${LABELS}"
+            fi
+          fi
+
+          # Run gate; capture exit code but don't fail yet (we comment first)
+          set +e
           python -m agentops check \
             --log-dir "$LOG_DIR" \
             --days 1 \
-            --baseline-days "${{ github.event.inputs.baseline_days || '7' }}" \
-            --s1-threshold 100 \
-            --overall-threshold 80 \
-            --write-summary -v
+            ${BASELINE_FLAG} \
+            --config .agentreg.yml \
+            --cases-file "$CASES_FILE" \
+            ${LABEL_FLAG} \
+            --write-summary \
+            --output-file gate_summary.md -v
+          GATE_RC=$?
+          set -e
+
+          echo "gate_rc=${GATE_RC}" >> "$GITHUB_OUTPUT"
+          exit $GATE_RC
+
+      # -- PR comment: post gate summary on failure --------------------
+      - name: Comment on PR
+        if: always() && github.event_name == 'pull_request' && steps.gate.outputs.gate_rc != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.existsSync('gate_summary.md')
+              ? fs.readFileSync('gate_summary.md', 'utf8')
+              : '## AgentReg Gate Check\n\n❌ Gate failed (no summary available)';
+
+            const marker = '<!-- agentreg-gate -->';
+            const fullBody = `${marker}\n${body}`;
+
+            // Update existing comment or create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: fullBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: fullBody,
+              });
+            }
+
+      # -- Upload baseline snapshot (main only) ------------------------
+      #    PRs compare against this artifact.
+      - name: Upload baseline snapshot (main)
+        if: github.ref == 'refs/heads/main' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BASELINE_ARTIFACT }}
+          path: runs/**
+          retention-days: 90
+          overwrite: true

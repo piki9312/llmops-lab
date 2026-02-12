@@ -17,10 +17,13 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .aggregate import severity_pass_rate
+from .aggregate import severity_pass_rate, compute_case_pass_rates
 from .analyze import compute_pass_rate_delta, compute_top_regressions
+from .config import AgentRegConfig, Thresholds, load_config
+from .diff_explain import FailureExplanation, explain_failures, render_failure_explanations
+from .flakiness import CaseStability, compute_flakiness, render_flakiness_report
 from .report_weekly import WeeklyReporter
 
 
@@ -54,10 +57,16 @@ class CheckResult:
     s2_total: int
     thresholds: List[ThresholdResult] = field(default_factory=list)
     top_regressions: List[Dict[str, Any]] = field(default_factory=list)
+    case_thresholds: List[ThresholdResult] = field(default_factory=list)
+    failure_explanations: List[FailureExplanation] = field(default_factory=list)
+    flaky_cases: List[CaseStability] = field(default_factory=list)
 
     @property
     def gate_passed(self) -> bool:
-        return all(t.passed for t in self.thresholds)
+        return (
+            all(t.passed for t in self.thresholds)
+            and all(t.passed for t in self.case_thresholds)
+        )
 
 
 # ------------------------------------------------------------------
@@ -69,28 +78,65 @@ def run_check(
     log_dir: str = "runs/agentreg",
     days: int = 1,
     baseline_days: int = 7,
-    s1_threshold: float = 100.0,
-    overall_threshold: float = 80.0,
-    top_n: int = 5,
+    baseline_dir: Optional[str] = None,
+    s1_threshold: Optional[float] = None,
+    overall_threshold: Optional[float] = None,
+    top_n: Optional[int] = None,
+    config: Optional[AgentRegConfig] = None,
+    labels: Sequence[str] = (),
+    changed_files: Sequence[str] = (),
+    cases_file: Optional[str] = None,
 ) -> CheckResult:
     """Load JSONL, compute metrics, evaluate thresholds.
+
+    When *config* is given, thresholds are resolved from the YAML config
+    (with *labels* / *changed_files* for rule matching).  Explicit
+    ``s1_threshold`` / ``overall_threshold`` / ``top_n`` CLI flags
+    **override** values from the config.
+
+    When *cases_file* is given, per-case ``min_pass_rate`` metadata
+    is read from the CSV and checked against actual per-case pass rates.
+
+    When *baseline_dir* is given the baseline is loaded from that directory
+    (all JSONL files, no date filter) instead of the trailing window inside
+    *log_dir*.  This is the recommended pattern for PR runs that download
+    the ``agentreg-baseline`` artifact produced by the latest main build.
 
     Returns a :class:`CheckResult` regardless of pass/fail so the caller
     can render output before deciding the exit code.
     """
 
+    # --- Resolve effective thresholds from config + CLI overrides ------
+    if config is None:
+        config = AgentRegConfig()  # built-in defaults
+
+    resolved = config.resolve_thresholds(
+        labels=labels, changed_files=changed_files,
+    )
+
+    eff_s1 = s1_threshold if s1_threshold is not None else resolved.s1_pass_rate
+    eff_overall = overall_threshold if overall_threshold is not None else resolved.overall_pass_rate
+    eff_top_n = top_n if top_n is not None else resolved.top_n
+
+    # --- Load JSONL ----------------------------------------------------
     end_date = datetime.now()
     current_start = end_date - timedelta(days=days)
-    baseline_end = current_start - timedelta(days=1)
-    baseline_start = baseline_end - timedelta(days=baseline_days)
 
     reporter = WeeklyReporter()
     current_reports = reporter.load_from_jsonl(
         log_dir=log_dir, start_date=current_start, end_date=end_date,
     )
-    baseline_reports = reporter.load_from_jsonl(
-        log_dir=log_dir, start_date=baseline_start, end_date=baseline_end,
-    )
+
+    if baseline_dir:
+        # Load ALL JSONL from the baseline directory (artifact from main).
+        baseline_reports = reporter.load_from_jsonl(log_dir=baseline_dir)
+    else:
+        # Fallback: trailing window inside the same log_dir.
+        baseline_end = current_start - timedelta(days=1)
+        baseline_start = baseline_end - timedelta(days=baseline_days)
+        baseline_reports = reporter.load_from_jsonl(
+            log_dir=log_dir, start_date=baseline_start, end_date=baseline_end,
+        )
 
     # Flatten results across runs
     current_results = [r for rpt in current_reports for r in rpt.results]
@@ -108,7 +154,7 @@ def run_check(
     top_regs: List[Dict[str, Any]] = []
     if baseline_results:
         top_regs = compute_top_regressions(
-            current_results, baseline_results, top_n=top_n,
+            current_results, baseline_results, top_n=eff_top_n,
         )
 
     # Threshold evaluation
@@ -118,15 +164,15 @@ def run_check(
     if s1_stats[2] > 0:
         thresholds.append(ThresholdResult(
             name="S1 pass rate",
-            threshold=s1_threshold,
+            threshold=eff_s1,
             actual=s1_stats[0],
-            passed=s1_stats[0] >= s1_threshold,
+            passed=s1_stats[0] >= eff_s1,
             detail=f"{s1_stats[1]}/{s1_stats[2]} passed",
         ))
     else:
         thresholds.append(ThresholdResult(
             name="S1 pass rate",
-            threshold=s1_threshold,
+            threshold=eff_s1,
             actual=0.0,
             passed=True,
             detail="no S1 cases (skip)",
@@ -135,11 +181,40 @@ def run_check(
     # Overall threshold
     thresholds.append(ThresholdResult(
         name="Overall pass rate",
-        threshold=overall_threshold,
+        threshold=eff_overall,
         actual=overall_rate,
-        passed=overall_rate >= overall_threshold,
+        passed=overall_rate >= eff_overall,
         detail=f"{passed}/{total} passed",
     ))
+
+    # --- Per-case min_pass_rate checks --------------------------------
+    case_thresholds: List[ThresholdResult] = []
+    case_min_rates = _load_case_min_rates(cases_file)
+    if case_min_rates and current_results:
+        case_pass_rates = compute_case_pass_rates(current_results)
+        for case_id, min_rate in sorted(case_min_rates.items()):
+            actual_rate = case_pass_rates.get(case_id)
+            if actual_rate is None:
+                continue  # case not in current run
+            actual_pct = actual_rate * 100
+            case_thresholds.append(ThresholdResult(
+                name=f"Case {case_id}",
+                threshold=min_rate,
+                actual=actual_pct,
+                passed=actual_pct >= min_rate,
+                detail=f"min_pass_rate={min_rate}%",
+            ))
+
+    # --- P2: Failure explanations -----------------------------------
+    failure_exps: List[FailureExplanation] = []
+    if current_results and baseline_results:
+        failure_exps = explain_failures(current_results, baseline_results)
+
+    # --- P2: Flakiness detection (when repeated runs exist) ----------
+    flaky: List[CaseStability] = []
+    if current_results:
+        all_stability = compute_flakiness(current_results, min_runs=2)
+        flaky = [s for s in all_stability if s.is_flaky]
 
     return CheckResult(
         current_runs=len(current_reports),
@@ -153,7 +228,41 @@ def run_check(
         s2_total=s2_stats[2],
         thresholds=thresholds,
         top_regressions=top_regs,
+        case_thresholds=case_thresholds,
+        failure_explanations=failure_exps,
+        flaky_cases=flaky,
     )
+
+
+# ------------------------------------------------------------------
+# Per-case min_pass_rate loader
+# ------------------------------------------------------------------
+
+def _load_case_min_rates(cases_file: Optional[str]) -> Dict[str, float]:
+    """Read ``min_pass_rate`` from a CSV cases file.
+
+    Returns a mapping ``case_id → min_pass_rate`` (only for cases that
+    have the column set).  Returns an empty dict when *cases_file* is
+    ``None`` or the file lacks the column.
+    """
+    if not cases_file:
+        return {}
+    p = Path(cases_file)
+    if not p.exists():
+        return {}
+    import csv
+    result: Dict[str, float] = {}
+    with open(p, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            cid = row.get("case_id", "")
+            raw = row.get("min_pass_rate", "")
+            if cid and raw:
+                try:
+                    result[cid] = float(raw)
+                except ValueError:
+                    pass
+    return result
 
 
 # ------------------------------------------------------------------
@@ -195,5 +304,24 @@ def render_check_summary(result: CheckResult) -> str:
                 f"{reg['baseline_rate']:.0f}% → {reg['current_rate']:.0f}% "
                 f"(Δ {reg['delta']:+.1f}%) — {ft}"
             )
+
+    # Per-case min_pass_rate violations
+    failed_cases = [t for t in result.case_thresholds if not t.passed]
+    if failed_cases:
+        lines += ["", "### Case Threshold Violations"]
+        for t in failed_cases:
+            lines.append(
+                f"- **{t.name}**: {t.actual:.1f}% < {t.threshold:.0f}% ({t.detail})"
+            )
+
+    # P2: Failure explanations
+    if result.failure_explanations:
+        lines.append("")
+        lines.append(render_failure_explanations(result.failure_explanations))
+
+    # P2: Flaky cases
+    if result.flaky_cases:
+        lines.append("")
+        lines.append(render_flakiness_report(result.flaky_cases, flaky_only=True))
 
     return "\n".join(lines) + "\n"

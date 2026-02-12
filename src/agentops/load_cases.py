@@ -33,15 +33,28 @@ def load_from_csv(file_path: str) -> List[TestCase]:
     with open(path, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
+            # Build metadata from standard + extended columns
+            meta: dict = {
+                'category': row.get('category', 'general'),
+                'severity': row.get('severity', 'S2'),
+            }
+            # P1 extended columns (optional – backwards compatible)
+            if row.get('owner'):
+                meta['owner'] = row['owner']
+            if row.get('tags'):
+                meta['tags'] = [t.strip() for t in row['tags'].split(';') if t.strip()]
+            if row.get('min_pass_rate'):
+                try:
+                    meta['min_pass_rate'] = float(row['min_pass_rate'])
+                except ValueError:
+                    pass
+
             case = TestCase(
                 case_id=row.get('case_id', ''),
                 name=row.get('name', ''),
                 input_prompt=row.get('input_prompt', ''),
                 expected_output=row.get('expected_output'),
-                metadata={
-                    'category': row.get('category', 'general'),
-                    'severity': row.get('severity', 'S2')
-                }
+                metadata=meta,
             )
             cases.append(case)
     

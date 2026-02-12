@@ -67,18 +67,33 @@
   - 回帰テスト実行（mockまたはsecretsがあるなら実LLM）
   - ベースライン（mainの最新）を取得
   - 比較してゲート判定
+  - ベースライン（mainの最新 artifact）を取得
+  - 比較してゲート判定（`agentops check --baseline-dir <artifact>`）
   - PRにサマリコメント
 
 - main:
-  - nightly（またはmerge後）に回帰を実行し baseline を更新（artifact/JSONL）
+  - nightly（またはmerge後）に回帰を実行し baseline を更新（`agentreg-baseline` artifact）
+
+---
+
+## ベースラインパターン（実装済み）
+
+| トリガー | baseline の取り方 | 仕組み |
+|----------|------------------|--------|
+| **main push / nightly** | 同一 `log_dir` の trailing N-day window (`--baseline-days`) | `agentops check --baseline-days 7` |
+| **PR** | main の最新成功 artifact (`agentreg-baseline`) をダウンロード | `agentops check --baseline-dir baseline/runs/agentreg` |
+
+- main push 成功時に `agentreg-baseline` artifact をアップロード（90日保持）
+- PR 時は `dawidd6/action-download-artifact` でダウンロード → `--baseline-dir` で渡す
+- artifact がまだ存在しない場合（初回）は trailing window にフォールバック
 
 ---
 
 ## 次の実装優先度（ロードマップ）
 
 P0（CIプロダクトとして成立）
-- `agentops check`（比較→exit code）を追加
-- ベースライン取得パターンを1つ決めてドキュメント化（artifact or repo snapshot）
+- ✅ `agentops check`（比較→exit code）
+- ✅ ベースラインパターン（main artifact + `--baseline-dir`）
 - 失敗時のPRコメント（要点だけ）
 
 P1（使われる）

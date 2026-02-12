@@ -69,11 +69,17 @@ def run_check(
     log_dir: str = "runs/agentreg",
     days: int = 1,
     baseline_days: int = 7,
+    baseline_dir: Optional[str] = None,
     s1_threshold: float = 100.0,
     overall_threshold: float = 80.0,
     top_n: int = 5,
 ) -> CheckResult:
     """Load JSONL, compute metrics, evaluate thresholds.
+
+    When *baseline_dir* is given the baseline is loaded from that directory
+    (all JSONL files, no date filter) instead of the trailing window inside
+    *log_dir*.  This is the recommended pattern for PR runs that download
+    the ``agentreg-baseline`` artifact produced by the latest main build.
 
     Returns a :class:`CheckResult` regardless of pass/fail so the caller
     can render output before deciding the exit code.
@@ -81,16 +87,22 @@ def run_check(
 
     end_date = datetime.now()
     current_start = end_date - timedelta(days=days)
-    baseline_end = current_start - timedelta(days=1)
-    baseline_start = baseline_end - timedelta(days=baseline_days)
 
     reporter = WeeklyReporter()
     current_reports = reporter.load_from_jsonl(
         log_dir=log_dir, start_date=current_start, end_date=end_date,
     )
-    baseline_reports = reporter.load_from_jsonl(
-        log_dir=log_dir, start_date=baseline_start, end_date=baseline_end,
-    )
+
+    if baseline_dir:
+        # Load ALL JSONL from the baseline directory (artifact from main).
+        baseline_reports = reporter.load_from_jsonl(log_dir=baseline_dir)
+    else:
+        # Fallback: trailing window inside the same log_dir.
+        baseline_end = current_start - timedelta(days=1)
+        baseline_start = baseline_end - timedelta(days=baseline_days)
+        baseline_reports = reporter.load_from_jsonl(
+            log_dir=log_dir, start_date=baseline_start, end_date=baseline_end,
+        )
 
     # Flatten results across runs
     current_results = [r for rpt in current_reports for r in rpt.results]

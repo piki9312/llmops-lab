@@ -254,6 +254,7 @@ def check_gate(
     log_dir: str = "runs/agentreg",
     days: int = 1,
     baseline_days: int = 7,
+    baseline_dir: Optional[str] = None,
     s1_threshold: float = 100.0,
     overall_threshold: float = 80.0,
     write_summary: bool = False,
@@ -266,9 +267,9 @@ def check_gate(
     """
     try:
         if verbose:
+            bl = f"baseline_dir={baseline_dir}" if baseline_dir else f"baseline_days={baseline_days}"
             print(
-                f"Gate check: log_dir={log_dir} days={days} "
-                f"baseline_days={baseline_days} "
+                f"Gate check: log_dir={log_dir} days={days} {bl} "
                 f"s1_threshold={s1_threshold}% overall_threshold={overall_threshold}%"
             )
 
@@ -276,6 +277,7 @@ def check_gate(
             log_dir=log_dir,
             days=days,
             baseline_days=baseline_days,
+            baseline_dir=baseline_dir,
             s1_threshold=s1_threshold,
             overall_threshold=overall_threshold,
         )
@@ -424,6 +426,12 @@ def main():
         help="Days for baseline period (default: 7)"
     )
     check_parser.add_argument(
+        "--baseline-dir",
+        default=None,
+        help="Directory containing baseline JSONL (e.g. downloaded artifact from main). "
+             "When set, --baseline-days is ignored."
+    )
+    check_parser.add_argument(
         "--s1-threshold",
         type=float,
         default=100.0,
@@ -461,6 +469,7 @@ def main():
             log_dir=args.log_dir,
             days=args.days,
             baseline_days=args.baseline_days,
+            baseline_dir=args.baseline_dir,
             s1_threshold=args.s1_threshold,
             overall_threshold=args.overall_threshold,
             write_summary=args.write_summary,

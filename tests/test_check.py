@@ -174,6 +174,61 @@ class TestRunCheck:
         assert len(result.top_regressions) >= 1
         assert result.top_regressions[0]["case_id"] == "TC001"
 
+    # ---- baseline_dir tests ----
+
+    def test_baseline_dir_used(self, tmp_path: Path):
+        """--baseline-dir overrides --baseline-days: reads from separate dir."""
+        # Current log dir (today)
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(case_id="TC001", severity="S1", passed=False, run_id="pr-run"),
+            _make_record(case_id="TC002", severity="S2", passed=True, run_id="pr-run"),
+        ])
+
+        # Baseline dir (simulates downloaded artifact) – all pass
+        baseline_dir = tmp_path / "baseline" / "runs" / "agentreg"
+        baseline_dir.mkdir(parents=True)
+        _write_jsonl(baseline_dir / "20260101.jsonl", [
+            _make_record(case_id="TC001", severity="S1", passed=True, run_id="main-run"),
+            _make_record(case_id="TC002", severity="S2", passed=True, run_id="main-run"),
+        ])
+
+        result = run_check(
+            log_dir=str(log_dir),
+            days=1,
+            baseline_dir=str(baseline_dir),
+        )
+        assert result.baseline_runs >= 1
+        assert len(result.top_regressions) >= 1
+        assert result.top_regressions[0]["case_id"] == "TC001"
+
+    def test_baseline_dir_empty_falls_through(self, tmp_path: Path):
+        """Empty baseline_dir → baseline_runs == 0, no regressions."""
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(case_id="TC001", severity="S1", passed=True),
+        ])
+        empty_baseline = tmp_path / "empty_baseline"
+        empty_baseline.mkdir()
+
+        result = run_check(
+            log_dir=str(log_dir), days=1, baseline_dir=str(empty_baseline),
+        )
+        assert result.baseline_runs == 0
+        assert result.top_regressions == []
+
+    def test_baseline_dir_cli_integration(self, tmp_path: Path):
+        """check_gate() accepts baseline_dir and passes it through."""
+        log_dir = _setup_jsonl(tmp_path, [
+            _make_record(case_id="TC001", severity="S1", passed=True),
+        ])
+        baseline_dir = tmp_path / "baseline"
+        baseline_dir.mkdir()
+        _write_jsonl(baseline_dir / "20260101.jsonl", [
+            _make_record(case_id="TC001", severity="S1", passed=True, run_id="main"),
+        ])
+
+        rc = check_gate(log_dir=str(log_dir), days=1, baseline_dir=str(baseline_dir))
+        assert rc == 0
+
 
 # ========================================================================
 # CheckResult / ThresholdResult

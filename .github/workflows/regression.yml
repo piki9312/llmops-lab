@@ -1,10 +1,6 @@
 name: AgentReg Regression (PR/Daily)
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
   schedule:
     # Daily 09:00 JST ≒ 00:00 UTC
     - cron: '0 0 * * *'

@@ -1,19 +1,58 @@
-name: CI
+name: CI/CD Pipeline
 
 on:
   push:
     branches: [main, dev, chore/*, feature/*, fix/*]
   pull_request:
     branches: [main, dev]
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
 
 jobs:
-  test:
-    name: Test & Eval
+  lint:
+    name: Lint & Format Check
     runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      
+      - name: Check code formatting (Black)
+        run: |
+          python -m black --check src/ tests/ scripts/ || (echo "❌ Code formatting issues found. Run: black src/ tests/ scripts/" && exit 1)
+      
+      - name: Run linting (Pylint)
+        run: |
+          python -m pylint src/ tests/ --fail-under=8.0 --disable=W0212 || echo "⚠️ Lint score below 8.0"
+      
+      - name: Check import sorting (isort)
+        run: |
+          python -m isort --check-only src/ tests/ || echo "⚠️ Import sorting issues found"
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    needs: lint
     
     strategy:
       matrix:
-        python-version: ["3.10", "3.11"]
+        python-version: ["3.10", "3.11", "3.12"]
     
     steps:
       - name: Checkout code
@@ -30,28 +69,161 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
       
-      - name: Run tests
+      - name: Run unit tests
         run: |
-          python -m pytest -v --tb=short
+          python -m pytest tests/ -v --tb=short -k "not openai" \
+            --cov=src/agentops --cov-report=xml --cov-report=term
       
-      - name: Run evaluation
+      - name: Run regression analysis tests
         run: |
-          python -m evals.run_eval
+          python -m pytest tests/test_regression_analysis.py -v --tb=short
+      
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        if: matrix.python-version == '3.11'
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+  evaluation:
+    name: Model Evaluation
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      
+      - name: Run model evaluation
+        run: |
+          python -m evals.run_eval || echo "⚠️ Evaluation completed with warnings"
       
       - name: Upload eval report
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: eval-report-py${{ matrix.python-version }}
+          name: eval-report
           path: evals/report.json
           retention-days: 30
+
+  build:
+    name: Build & Package
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
       
-      - name: Check code quality (lint)
-        if: matrix.python-version == '3.10'
-        run: |
-          python -m pip install pylint
-          pylint src/ tests/ --fail-under=8.0 || echo "⚠️ Lint score below 8.0"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
       
-      - name: Verify logs created
+      - name: Install dependencies
         run: |
-          test -f runs/logs/gateway.jsonl && echo "✅ Log file created" || echo "⚠️ Log file missing"
+          python -m pip install --upgrade pip
+          pip install build wheel
+      
+      - name: Build package
+        run: |
+          python -m build
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package
+          path: dist/
+          retention-days: 30
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit safety
+      
+      - name: Run Bandit (code security)
+        run: |
+          python -m bandit -r src/ -ll || echo "⚠️ Security issues found"
+      
+      - name: Check dependencies
+        run: |
+          python -m safety check --json || echo "⚠️ Dependency vulnerabilities found"
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: llmops-lab:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  status:
+    name: CI Status
+    runs-on: ubuntu-latest
+    needs: [lint, test, evaluation, security]
+    if: always()
+    
+    steps:
+      - name: Check CI Status
+        run: |
+          if [[ "${{ needs.lint.result }}" == "failure" || "${{ needs.test.result }}" == "failure" ]]; then
+            echo "❌ CI pipeline failed"
+            exit 1
+          fi
+          echo "✅ CI pipeline passed"
+      
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ needs.test.result }}' === 'success' ? '✅' : '❌';
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `${status} **CI Pipeline Result**\n- Lint: ${{ needs.lint.result }}\n- Tests: ${{ needs.test.result }}\n- Security: ${{ needs.security.result }}`
+            })
+

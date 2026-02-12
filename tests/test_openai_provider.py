@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.llmops.llm_client import OpenAIProvider
+from llmops.llm_client import OpenAIProvider
 
 
 class TestOpenAIProviderInit:

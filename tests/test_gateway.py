@@ -8,7 +8,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from src.llmops.gateway import app
+from llmops.gateway import app
 
 
 @pytest.fixture

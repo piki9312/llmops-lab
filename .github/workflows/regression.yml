@@ -1,0 +1,99 @@
+name: AgentReg Regression (PR/Daily)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Daily 09:00 JST ≒ 00:00 UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      cases_file:
+        description: 'CSV path for regression cases'
+        required: false
+        default: 'cases/agent_regression.csv'
+      log_dir:
+        description: 'JSONL log directory'
+        required: false
+        default: 'runs/agentreg'
+      report_days:
+        description: 'Days for report window'
+        required: false
+        default: '7'
+      baseline_days:
+        description: 'Baseline days (previous window)'
+        required: false
+        default: '7'
+
+permissions:
+  contents: read
+
+jobs:
+  agentreg:
+    name: Run AgentReg and gate on S1
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Generate run_id
+        id: runid
+        run: |
+          RUN_ID="$(python -c 'import uuid; print(uuid.uuid4())')"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Run regression (JSONL append)
+        run: |
+          CASES_FILE="${{ github.event.inputs.cases_file || 'cases/agent_regression.csv' }}"
+          LOG_DIR="${{ github.event.inputs.log_dir || 'runs/agentreg' }}"
+
+          mkdir -p "$LOG_DIR"
+          # NOTE: run-daily returns non-zero when *any* failures exist.
+          # We don't fail here; we gate strictly on S1 via JSONL parsing.
+          python -m agentops run-daily "$CASES_FILE" --log-dir "$LOG_DIR" --run-id "$RUN_ID" -v || true
+
+      - name: Generate report (Markdown)
+        if: always()
+        run: |
+          LOG_DIR="${{ github.event.inputs.log_dir || 'runs/agentreg' }}"
+          DAYS="${{ github.event.inputs.report_days || '7' }}"
+          BASELINE_DAYS="${{ github.event.inputs.baseline_days || '7' }}"
+
+          mkdir -p reports
+          python -m agentops report --log-dir "$LOG_DIR" --days "$DAYS" --baseline-days "$BASELINE_DAYS" -o "reports/regression_${GITHUB_SHA}.md" -v || true
+
+      - name: Upload artifacts (JSONL + report)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentreg-${{ github.ref_name }}-${{ steps.runid.outputs.run_id }}
+          path: |
+            runs/**
+            reports/**
+          retention-days: 30
+
+      - name: Gate: check thresholds (S1 + overall)
+        run: |
+          LOG_DIR="${{ github.event.inputs.log_dir || 'runs/agentreg' }}"
+          python -m agentops check \
+            --log-dir "$LOG_DIR" \
+            --days 1 \
+            --baseline-days "${{ github.event.inputs.baseline_days || '7' }}" \
+            --s1-threshold 100 \
+            --overall-threshold 80 \
+            --write-summary -v

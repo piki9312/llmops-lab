@@ -5,6 +5,11 @@ __pycache__/
 *.pyd
 *.so
 
+# Environment / Secrets
+.env
+.env.*
+!.env.example
+
 # Virtual env
 .venv/
 

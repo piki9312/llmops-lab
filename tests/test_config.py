@@ -3,7 +3,7 @@
 import os
 import pytest
 
-from src.llmops.config import (
+from llmops.config import (
     get_env_bool,
     get_env_int,
     get_env_float,

@@ -11,6 +11,10 @@ dependencies = [
     "openai>=1.0.0",
 ]
 
+[project.scripts]
+agentreg = "agentops.cli:main"
+agentops = "agentops.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4.0",

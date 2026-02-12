@@ -2,9 +2,10 @@
 
 **回帰テスト×運用に特化した Dev 向け CI プロダクト（LLM/Agent 品質劣化の自動検知）**
 
-[![Tests](https://img.shields.io/badge/tests-255%20passed-success)](tests/)
+[![CI](https://github.com/piki9312/llmops-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/piki9312/llmops-lab/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-260%20passed-success)](tests/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
-[![Docker](https://img.shields.io/badge/docker-ready-blue)](Dockerfile)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 LLMOps Lab は、LLM/Agent の変更（prompt / tool / model / provider / code）による **品質劣化を CI 上で自動検知**し、どこが悪化したかを要約するプロダクトです。
@@ -52,7 +53,51 @@ LLMOps Lab は、LLM/Agent の変更（prompt / tool / model / provider / code�
 
 ---
 
-## 🚀 クイックスタート
+## �️ デモ出力
+
+### `agentops check` — CI ゲート判定
+
+```
+$ python -m agentops check --log-dir runs/agentreg --baseline-days 7 --config .agentreg.yml -v
+
+=== AgentReg Gate Check ===
+Gate: ✅ PASS
+Current runs : 45
+Baseline runs: 40
+Overall : 93.33% (threshold 80.0%)
+S1      : 100.00% (15/15, threshold 100.0%)
+S2      : 90.00% (27/30)
+  ✅ S1 pass rate: 100.00% >= 100.0%  15/15 passed
+  ✅ Overall pass rate: 93.33% >= 80.0%  42/45 passed
+```
+
+### `agentops run-daily` — 回帰テスト実行（E2E: OpenAI）
+
+```
+$ python -m agentops run-daily cases/agent_regression.csv --log-dir runs/agentreg --repeat 1 -v
+
+[TC001] weather_api (S1) ... ✅ PASS  (2190ms, 126 tokens, $0.00)
+[TC002] payment_api (S1) ... ✅ PASS  (1925ms, 98 tokens, $0.00)
+[TC003] capital_qa  (S2) ... ✅ PASS  (1460ms, 42 tokens, $0.00)
+--- Summary ---
+Passed: 3/3  |  S1: 2/2  |  S2: 1/1
+Results saved → runs/agentreg/20260212.jsonl
+```
+
+### `agentops report` — 週次レポート
+
+```
+$ python -m agentops report --log-dir runs/agentreg --days 7 --baseline-days 7 -o reports/weekly.md
+
+📊 Weekly Regression Report generated → reports/weekly.md
+  Overall: 93.3% (prev 100.0%) → -6.7%
+  S1: 100.0% | S2: 90.0%
+  New regressions: 2 cases
+```
+
+---
+
+## �🚀 クイックスタート
 
 ### ローカル開発
 

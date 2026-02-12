@@ -7,9 +7,12 @@ from agentops.runner import RegressionRunner
 from agentops.models import TestCase
 
 
+MOCK_CONFIG = {"provider": "mock", "model": "gpt-4-mock"}
+
+
 def test_runner_creation():
     """Test RegressionRunner can be instantiated with llmops integration."""
-    runner = RegressionRunner(use_llmops=True)
+    runner = RegressionRunner(use_llmops=True, llmops_config=MOCK_CONFIG)
     assert runner is not None
     assert runner.use_llmops is True
     # llm_client should be initialized when use_llmops=True
@@ -27,7 +30,7 @@ def test_runner_without_llmops():
 @pytest.mark.asyncio
 async def test_run_single_case():
     """Test running a single test case via llmops."""
-    runner = RegressionRunner(use_llmops=True)
+    runner = RegressionRunner(use_llmops=True, llmops_config=MOCK_CONFIG)
     
     case = TestCase(
         case_id="TC001",

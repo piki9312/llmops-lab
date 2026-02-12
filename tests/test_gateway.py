@@ -12,15 +12,19 @@ from llmops.gateway import app
 
 
 @pytest.fixture
-def client():
-    """Provide FastAPI test client.
+def client(monkeypatch):
+    """Provide FastAPI test client with mock provider.
     
-    入力：なし
-    出力：TestClient インスタンス
-    副作用：テスト用クライアント初期化
-    失敗モード：なし
+    Always forces mock provider so gateway tests are deterministic
+    and don't require an API key.
     """
-    return TestClient(app)
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    monkeypatch.setenv("LLM_MODEL", "gpt-4-mock")
+    # Reimport the app so it picks up the patched env
+    import importlib
+    import llmops.gateway as gw
+    importlib.reload(gw)
+    return TestClient(gw.app)
 
 
 class TestGenerateEndpoint:

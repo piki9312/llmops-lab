@@ -19,6 +19,14 @@ __pycache__/
 # Build artifacts
 *.egg-info/
 
+# Generated outputs (reports, logs, eval results)
+evals/report.json
+reports/*.md
+!reports/.gitkeep
+runs/agentreg/*.jsonl
+!runs/agentreg/.gitkeep
+runs/logs/
+
 # OS
 .DS_Store
 Thumbs.db

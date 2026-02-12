@@ -1,8 +1,8 @@
-# Agent Regression Testing - Onboarding Guide
+# Agent Regression Testing（AgentReg）- Onboarding Guide
 
 ## Overview
 
-Agent Regression (AgentOps) is a testing framework for ensuring the quality and consistency of AI agent outputs over time.
+Agent Regression（AgentReg / AgentOps）は、AI エージェントの変更で **品質が落ちたかを CI で自動検知**するための回帰テスト基盤です。
 
 ## What is Agent Regression?
 
@@ -22,7 +22,11 @@ TC001,Greeting,Hello!,A friendly response,basic
 ### 2. Run Tests
 
 ```bash
-python -m agentops.cli cases/agent_regression.csv -v
+# 1回実行して JSONL に追記
+python -m agentops run-daily cases/agent_regression.csv --log-dir runs/agentreg -v
+
+# ベースライン比較レポート（直近7日 vs その前7日）
+python -m agentops report --log-dir runs/agentreg --days 7 --baseline-days 7 -o reports/weekly_regression_report.md -v
 ```
 
 ### 3. Review Results
@@ -104,7 +108,18 @@ src/agentops/            # Source code
 
 ## Integration with CI/CD
 
-[TODO: Add CI/CD integration steps]
+最小構成は「main でベースラインを更新」→「PR で比較してゲート」です。
+
+### main（nightly / merge後）
+- `run-daily` を実行して JSONL を生成
+- JSONL または週次レポートを artifact として保存
+
+### PR
+- `run-daily` を実行して当該PRの結果を生成
+- main の最新 artifact を取得してベースラインにする
+- `report` を実行して差分を可視化（必要なら PR コメント）
+
+参考: [docs/GITHUB_ACTIONS.md](GITHUB_ACTIONS.md) と [docs/AGENTREG_CI_PRODUCT.md](AGENTREG_CI_PRODUCT.md)
 
 ## Troubleshooting
 

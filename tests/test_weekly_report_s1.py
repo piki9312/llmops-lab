@@ -4,8 +4,8 @@ Tests for S1/S2 pass rate reporting in weekly reports.
 
 import pytest
 from datetime import datetime
-from src.agentops.report_weekly import WeeklyReporter
-from src.agentops.models import RegressionReport, TestResult
+from agentops.report_weekly import WeeklyReporter
+from agentops.models import RegressionReport, TestResult
 
 
 class TestWeeklyReportS1S2:

@@ -4,7 +4,7 @@ Tests for JSON contract validation in S1 regression cases.
 
 import pytest
 import json
-from src.agentops.json_validator import JSONContractValidator
+from agentops.json_validator import JSONContractValidator
 
 
 class TestJSONContractValidator:

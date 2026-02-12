@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from src.llmops.rate_limiter import TokenBucket, RateLimiter
+from llmops.rate_limiter import TokenBucket, RateLimiter
 
 
 class TestTokenBucket:

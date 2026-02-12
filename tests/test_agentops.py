@@ -5,17 +5,17 @@ Tests for agentops.models module.
 import pytest
 from datetime import datetime
 
-from src.agentops.models import TestCase, TestResult, RegressionReport
+from agentops.models import TestCase, TestResult, RegressionReport
 
 
 def test_imports():
     """Test that all modules can be imported."""
-    from src.agentops import models
-    from src.agentops import load_cases
-    from src.agentops import runner
-    from src.agentops import evaluator
-    from src.agentops import report_weekly
-    from src.agentops import cli
+    from agentops import models
+    from agentops import load_cases
+    from agentops import runner
+    from agentops import evaluator
+    from agentops import report_weekly
+    from agentops import cli
     
     assert models is not None
     assert load_cases is not None

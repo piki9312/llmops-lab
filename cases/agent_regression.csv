@@ -9,3 +9,23 @@ TC007,Database Write,Save user profile to database,"{""record_id"":""rec_789"","
 TC008,External Service Integration,Fetch data from third-party service,"{""provider"":""external_api"",""data_retrieved"":true,""record_count"":25,""timestamp"":""2026-02-01T10:30:00Z""}",api,S1
 TC009,Cache Lookup,Get cached user preferences,Preferences returned,performance,S2
 TC010,Report Generation,Generate monthly summary report,Report generated,reporting,S2
+TC011,Order Creation,Create order for 3 items totaling $249.99,"{""order_id"":""ord_100"",""items"":3,""total"":249.99,""currency"":""USD"",""status"":""created""}",api,S1
+TC012,Inventory Check,Check stock for SKU-7890,"{""sku"":""SKU-7890"",""in_stock"":true,""quantity"":42}",api,S1
+TC013,Nested JSON Response,Fetch user profile with address,"{""user_id"":""usr_200"",""profile"":{""name"":""Alice"",""address"":{""city"":""Tokyo"",""zip"":""100-0001""}}}",api,S1
+TC014,Empty Array Response,List notifications for new user,"{""user_id"":""usr_new"",""notifications"":[]}",api,S1
+TC015,Batch Status Check,Get status of 3 background jobs,"{""jobs"":[{""id"":""j1"",""status"":""done""},{""id"":""j2"",""status"":""running""},{""id"":""j3"",""status"":""queued""}]}",api,S1
+TC016,Text Summarisation,Summarise the following paragraph: Artificial intelligence has transformed many industries. From healthcare diagnostics to autonomous vehicles the impact is broad.,A concise summary of the paragraph,summarisation,S2
+TC017,Sentiment Analysis,Classify the sentiment: I absolutely loved this product!,Positive sentiment,classification,S2
+TC018,Negative Sentiment,Classify the sentiment: This was the worst experience ever.,Negative sentiment,classification,S2
+TC019,Multi-language Greeting,Translate Hello World into Japanese,こんにちは世界 or equivalent,translation,S2
+TC020,Long Input Handling,Repeat after me (512 words): Lorem ipsum dolor sit amet consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.,Echoed text,robustness,S2
+TC021,Edge Case Empty Input,,An appropriate response or error for empty input,robustness,S2
+TC022,Special Characters,Handle input with special chars: <script>alert(1)</script> & 日本語テスト,Safe response without executing scripts,robustness,S2
+TC023,Numeric Precision,What is 0.1 + 0.2?,0.3,math,S2
+TC024,Boolean Logic,Is the statement true or false: All cats are mammals and some mammals are cats,True,reasoning,S2
+TC025,Date Calculation,What date is 90 days after 2026-01-01?,2026-04-01,reasoning,S2
+TC026,Webhook Delivery,Send webhook to https://example.com/hook,"{""webhook_id"":""wh_300"",""url"":""https://example.com/hook"",""delivered"":true,""status_code"":200}",api,S1
+TC027,Rate Limit Info,Get current rate limit status,"{""limit"":1000,""remaining"":742,""reset_at"":""2026-02-01T13:00:00Z""}",api,S1
+TC028,Token Refresh,Refresh expired access token,"{""access_token"":""new_tok_abc"",""expires_in"":3600,""token_type"":""Bearer""}",api,S1
+TC029,Idempotency Check,Retry payment with idempotency key idem_555,"{""transaction_id"":""tx_555"",""idempotent"":true,""status"":""already_completed""}",api,S1
+TC030,Error Response Format,Call invalid endpoint /api/v1/nonexistent,"{""error"":""not_found"",""message"":""Endpoint does not exist"",""status_code"":404}",api,S1

@@ -2,7 +2,7 @@
 
 import time
 
-from src.llmops.cache import InMemoryCacheStore, compute_cache_key
+from llmops.cache import InMemoryCacheStore, compute_cache_key
 
 
 class TestInMemoryCacheStore:

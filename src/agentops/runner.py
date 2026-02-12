@@ -40,7 +40,7 @@ class RegressionRunner:
     
     def _init_llmops_client(self):
         """Initialize llmops LLMClient for test execution."""
-        from src.llmops.llm_client import LLMClient, MockLLMProvider, OpenAIProvider
+        from llmops.llm_client import LLMClient, MockLLMProvider, OpenAIProvider
         
         provider_name = self.llmops_config.get("provider", "mock")
         if provider_name == "openai":
@@ -181,7 +181,7 @@ class RegressionRunner:
         Returns:
             Dict with output and metrics
         """
-        from src.llmops.pricing import calculate_cost_usd
+        from llmops.pricing import calculate_cost_usd
         
         result = await self.llm_client.generate(
             messages=[{"role": "user", "content": prompt}],

@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 
-from src.llmops.prompt_manager import PromptTemplate, PromptManager
+from llmops.prompt_manager import PromptTemplate, PromptManager
 
 
 class TestPromptTemplate:

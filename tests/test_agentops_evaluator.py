@@ -5,8 +5,8 @@ Tests for agentops.evaluator module.
 import pytest
 from datetime import datetime
 
-from src.agentops.evaluator import Evaluator
-from src.agentops.models import TestResult, RegressionReport
+from agentops.evaluator import Evaluator
+from agentops.models import TestResult, RegressionReport
 
 
 def test_calculate_accuracy():
@@ -93,3 +93,51 @@ def test_generate_summary():
     assert "avg_latency_ms" in summary
     assert "total_cost_usd" in summary
     assert "cache_hit_rate_percent" in summary
+    # S1/S2 breakdown – no severity in metrics → totals are 0
+    assert summary["s1_total"] == 0
+    assert summary["s2_total"] == 0
+    assert summary["pass_rate_s1"] == "N/A"
+    assert summary["pass_rate_s2"] == "N/A"
+
+
+def test_generate_summary_s1_s2_breakdown():
+    """Test S1/S2 pass-rate breakdown in generate_summary."""
+    s1_pass = TestResult(
+        case_id="TC_S1_01", actual_output="ok", passed=True,
+        score=1.0, execution_time=0.1, timestamp=datetime.now(),
+        metrics={"severity": "S1"},
+    )
+    s1_fail = TestResult(
+        case_id="TC_S1_02", actual_output="ng", passed=False,
+        score=0.0, execution_time=0.1, timestamp=datetime.now(),
+        metrics={"severity": "S1"},
+    )
+    s2_pass = TestResult(
+        case_id="TC_S2_01", actual_output="ok", passed=True,
+        score=1.0, execution_time=0.1, timestamp=datetime.now(),
+        metrics={"severity": "S2"},
+    )
+
+    report = RegressionReport(
+        run_id="run-s1s2",
+        timestamp=datetime.now(),
+        total_cases=3,
+        passed_cases=2,
+        failed_cases=1,
+        average_score=0.67,
+        results=[s1_pass, s1_fail, s2_pass],
+    )
+
+    summary = Evaluator.generate_summary(report)
+
+    # S1: 1 passed / 2 total = 50%
+    assert summary["s1_total"] == 2
+    assert summary["s1_passed"] == 1
+    assert summary["s1_rate_percent"] == 50.0
+    assert summary["pass_rate_s1"] == "50.00%"
+
+    # S2: 1 passed / 1 total = 100%
+    assert summary["s2_total"] == 1
+    assert summary["s2_passed"] == 1
+    assert summary["s2_rate_percent"] == 100.0
+    assert summary["pass_rate_s2"] == "100.00%"

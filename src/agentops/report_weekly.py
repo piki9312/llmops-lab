@@ -2,14 +2,26 @@
 Weekly reporting functionality for Agent Regression.
 
 This module generates weekly regression reports and summaries.
+
+Orchestrator: data loading (``load_from_jsonl``), metric computation,
+and rendering are delegated to:
+
+* :mod:`agentops.aggregate`  – pass-rate / failure stats
+* :mod:`agentops.analyze`    – week-over-week deltas & status
+* :mod:`agentops.render_md`  – Markdown assembly
 """
 
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Tuple
-import math
+from typing import List, Optional, Dict, Tuple, Any
+import json
 
-from .models import RegressionReport
+from .models import RegressionReport, TestResult, AgentRunRecord
+
+# Delegated modules
+from . import aggregate as agg
+from . import analyze
+from . import render_md
 
 
 class WeeklyReporter:
@@ -25,6 +37,106 @@ class WeeklyReporter:
         self.reports_dir = Path(reports_dir)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
     
+    @staticmethod
+    def load_from_jsonl(
+        log_dir: str = "runs/agentreg",
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> List[RegressionReport]:
+        """
+        Load test results from JSONL files and convert to RegressionReports.
+        
+        Args:
+            log_dir: Directory containing YYYYMMDD.jsonl files
+            start_date: Start date (inclusive)
+            end_date: End date (inclusive)
+            
+        Returns:
+            List of RegressionReports grouped by run_id
+        """
+        log_path = Path(log_dir)
+        if not log_path.exists():
+            return []
+        
+        # Collect all records
+        records: List[AgentRunRecord] = []
+        for jsonl_file in sorted(log_path.glob("*.jsonl")):
+            # Parse date from filename (YYYYMMDD.jsonl)
+            try:
+                file_date = datetime.strptime(jsonl_file.stem, "%Y%m%d").replace(tzinfo=None)
+                # Compare dates without time components
+                start_date_cmp = start_date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None) if start_date else None
+                end_date_cmp = end_date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None) if end_date else None
+                
+                if start_date_cmp and file_date < start_date_cmp:
+                    continue
+                if end_date_cmp and file_date > end_date_cmp:
+                    continue
+            except ValueError:
+                continue
+            
+            # Load records from file
+            with open(jsonl_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        data = json.loads(line)
+                        record = AgentRunRecord(**data)
+                        records.append(record)
+        
+        # Group by run_id
+        runs: Dict[str, List[AgentRunRecord]] = {}
+        for record in records:
+            if record.run_id not in runs:
+                runs[record.run_id] = []
+            runs[record.run_id].append(record)
+        
+        # Convert to RegressionReports
+        reports: List[RegressionReport] = []
+        for run_id, run_records in runs.items():
+            if not run_records:
+                continue
+            
+            # Convert AgentRunRecords to TestResults
+            results = [
+                TestResult(
+                    case_id=rec.case_id,
+                    actual_output=rec.output_json if rec.output_json else "",
+                    passed=rec.passed,
+                    score=1.0 if rec.passed else 0.0,
+                    execution_time=rec.latency_ms / 1000.0,  # Convert to seconds
+                    timestamp=rec.timestamp,
+                    failure_type=rec.failure_type,
+                    error="; ".join(rec.reasons) if rec.reasons else None,
+                    latency_ms=rec.latency_ms,
+                    metrics={
+                        "severity": rec.severity,
+                        "category": rec.category,
+                        "provider": rec.provider,
+                        "model": rec.model,
+                        "token_usage": rec.token_usage,
+                        "cost_usd": rec.cost_usd,
+                    }
+                )
+                for rec in run_records
+            ]
+            
+            passed_count = sum(1 for r in results if r.passed)
+            total_count = len(results)
+            avg_score = sum(r.score for r in results) / total_count if total_count else 0.0
+            
+            report = RegressionReport(
+                run_id=run_id,
+                timestamp=run_records[0].timestamp,
+                total_cases=total_count,
+                passed_cases=passed_count,
+                failed_cases=total_count - passed_count,
+                average_score=avg_score,
+                results=results
+            )
+            reports.append(report)
+        
+        return reports
+    
     def generate_report(
         self,
         reports: List[RegressionReport],
@@ -37,6 +149,7 @@ class WeeklyReporter:
         Args:
             reports: List of regression reports from the week
             week_start: Start date of the week (defaults to current week)
+            previous_week_reports: Optional baseline reports for regression analysis
             
         Returns:
             Markdown formatted report string
@@ -54,16 +167,16 @@ class WeeklyReporter:
             else []
         )
 
-        # Calculate aggregates
+        # Calculate aggregates via aggregate module
         total_runs = len(reports)
         total_cases = sum(r.total_cases for r in reports)
         total_passed = sum(r.passed_cases for r in reports)
         overall_pass_rate = (total_passed / total_cases * 100) if total_cases else 0.0
 
-        s1_stats = self._severity_pass_rate(all_results, "S1")
-        s2_stats = self._severity_pass_rate(all_results, "S2")
-        prev_s1_stats = self._severity_pass_rate(prev_results, "S1") if prev_results else None
-        prev_s2_stats = self._severity_pass_rate(prev_results, "S2") if prev_results else None
+        s1_stats = agg.severity_pass_rate(all_results, "S1")
+        s2_stats = agg.severity_pass_rate(all_results, "S2")
+        prev_s1_stats = agg.severity_pass_rate(prev_results, "S1") if prev_results else None
+        prev_s2_stats = agg.severity_pass_rate(prev_results, "S2") if prev_results else None
 
         prev_s1 = prev_s1_stats[0] if prev_s1_stats and prev_s1_stats[2] > 0 else None
         prev_s2 = prev_s2_stats[0] if prev_s2_stats and prev_s2_stats[2] > 0 else None
@@ -75,249 +188,130 @@ class WeeklyReporter:
         latencies = [r.latency_ms for r in all_results if r.latency_ms > 0]
         if not latencies:
             latencies = [r.latency_ms for r in all_results]
-        latency_p50 = self._percentile(latencies, 50)
-        latency_p95 = self._percentile(latencies, 95)
+        latency_p50 = agg.percentile(latencies, 50)
+        latency_p95 = agg.percentile(latencies, 95)
 
         # Cost per task
         total_cost = sum(r.cost_usd for r in all_results)
         cost_per_task = (total_cost / total_cases) if total_cases else 0.0
 
-        # Failure breakdowns
-        failure_breakdown = self._failure_breakdown(all_results)
-        top_failures = self._top_failures(all_results)
+        # Failure breakdowns via aggregate module
+        fb = agg.failure_breakdown(all_results)
+        top_fail = agg.top_failures(all_results)
 
-        # Biggest regression
-        worst_regression = self._worst_regression(all_results, prev_results)
+        # Regression analysis via analyze module
+        worst_reg = analyze.worst_regression(all_results, prev_results)
 
-        # Overall judgment
-        overall_status = self._overall_status(
+        if prev_results:
+            baseline_rate, current_all_rate, all_delta = analyze.compute_pass_rate_delta(
+                all_results, prev_results)
+            failure_type_delta = analyze.compute_failure_type_delta(all_results, prev_results)
+            top_regressions = analyze.compute_top_regressions(all_results, prev_results)
+        else:
+            baseline_rate = None
+            current_all_rate = overall_pass_rate
+            all_delta = None
+            failure_type_delta = {}
+            top_regressions = []
+
+        status = analyze.overall_status(
             overall_pass_rate,
             s1_stats[0],
             s1_stats[2],
             s2_stats[0],
             s2_stats[2],
-            worst_regression[1],
+            worst_reg[1],
         )
 
-        # Next actions
-        next_actions = self._next_actions(failure_breakdown, worst_regression)
-        
-        # Generate markdown report
-        report_lines = [
-            f"# Agent Regression Weekly Report",
-            f"",
-            f"**Week:** {week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}",
-            f"",
-            f"## Summary（上の人向け）",
-            f"",
-            f"- 総合判定: {overall_status}",
-            f"- S1成功率: {self._format_rate(s1_stats)}" + (f"（先週比 {s1_delta:+.2f}%）" if s1_delta is not None else "（先週比 N/A）"),
-            f"- S2成功率: {self._format_rate(s2_stats)}" + (f"（先週比 {s2_delta:+.2f}%）" if s2_delta is not None else "（先週比 N/A）"),
-            f"- 一番重要な回帰: {worst_regression[0]}",
-            f"- 来週のアクション:",
-            f"  - {next_actions[0]}",
-            f"  - {next_actions[1]}",
-            f"  - {next_actions[2]}",
-            f"",
-            f"## 主要メトリクス（運用担当向け）",
-            f"",
-            f"- 総実行数: {total_runs}",
-            f"- 成功率（全体）: {overall_pass_rate:.2f}%",
-            f"- 成功率（S1）: {self._format_rate(s1_stats)}",
-            f"- 成功率（S2）: {self._format_rate(s2_stats)}",
-            f"- レイテンシ p50/p95: {latency_p50:.2f}ms / {latency_p95:.2f}ms",
-            f"- コスト/タスク: ${cost_per_task:.6f}",
-            f"- 失敗分類内訳:",
-        ]
+        actions = analyze.next_actions(fb, worst_reg)
 
-        if failure_breakdown:
-            for failure_type, count in failure_breakdown.items():
-                ratio = (count / max(1, sum(failure_breakdown.values()))) * 100
-                report_lines.append(f"  - {failure_type}: {count}件 ({ratio:.1f}%)")
-        else:
-            report_lines.append("  - なし")
+        # Render via render_md module
+        return render_md.render_report(
+            week_start_str=week_start.strftime('%Y-%m-%d'),
+            week_end_str=week_end.strftime('%Y-%m-%d'),
+            overall_status=status,
+            s1_stats=s1_stats,
+            s2_stats=s2_stats,
+            s1_delta=s1_delta,
+            s2_delta=s2_delta,
+            worst_regression=worst_reg,
+            next_actions=actions,
+            total_runs=total_runs,
+            overall_pass_rate=overall_pass_rate,
+            latency_p50=latency_p50,
+            latency_p95=latency_p95,
+            cost_per_task=cost_per_task,
+            failure_breakdown=fb,
+            top_failures=top_fail,
+            all_results=all_results if prev_results else None,
+            prev_results=prev_results if prev_results else None,
+            baseline_rate=baseline_rate,
+            current_all_rate=current_all_rate,
+            all_delta=all_delta,
+            failure_type_delta=failure_type_delta,
+            top_regressions=top_regressions,
+            reports=reports,
+        )
 
-        report_lines.extend([
-            f"",
-            f"## 失敗トップ10（どこが壊れてるか）",
-        ])
-
-        if top_failures:
-            for case_id, failure_type, count, cause in top_failures:
-                report_lines.append(
-                    f"- {case_id} / {failure_type} / {count}件 / 原因候補: {cause}"
-                )
-        else:
-            report_lines.append("- 失敗なし")
-
-        report_lines.extend([
-            f"",
-            f"## Individual Runs",
-            f""
-        ])
-        
-        for report in reports:
-            report_lines.extend([
-                f"### Run {report.run_id[:8]}",
-                f"- Timestamp: {report.timestamp.strftime('%Y-%m-%d %H:%M:%S')}",
-                f"- Cases: {report.total_cases}",
-                f"- Passed: {report.passed_cases}",
-                f"- Failed: {report.failed_cases}",
-                f"- Pass Rate: {report.pass_rate:.2f}%",
-                f""
-            ])
-        
-        return "\n".join(report_lines)
+    # ------------------------------------------------------------------
+    # Backward-compatible delegators (thin wrappers around new modules)
+    # Tests and external callers can still use WeeklyReporter._xxx()
+    # ------------------------------------------------------------------
 
     @staticmethod
-    def _normalize_severity(value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        value = str(value).strip().upper()
-        if value in {"S1", "SEV1", "1", "CRITICAL"}:
-            return "S1"
-        if value in {"S2", "SEV2", "2", "HIGH"}:
-            return "S2"
-        return None
+    def _normalize_severity(value):
+        return agg.normalize_severity(value)
 
-    def _severity_pass_rate(self, results: List, severity: str) -> Tuple[float, int, int]:
-        filtered = [r for r in results if self._normalize_severity(
-            (r.metrics or {}).get("severity") or (r.metrics or {}).get("priority") or (r.metrics or {}).get("tier")
-        ) == severity]
-        total = len(filtered)
-        passed = sum(1 for r in filtered if r.passed)
-        rate = (passed / total * 100) if total else 0.0
-        return rate, passed, total
+    def _severity_pass_rate(self, results, severity):
+        return agg.severity_pass_rate(results, severity)
 
     @staticmethod
-    def _format_rate(stats: Tuple[float, int, int]) -> str:
-        rate, _, total = stats
-        return f"{rate:.2f}%" if total > 0 else "N/A"
+    def _format_rate(stats):
+        return agg.format_rate(stats)
 
     @staticmethod
-    def _percentile(values: List[float], percentile: int) -> float:
-        if not values:
-            return 0.0
-        values = sorted(values)
-        index = max(0, math.ceil((percentile / 100) * len(values)) - 1)
-        return values[index]
+    def _percentile(values, pct):
+        return agg.percentile(values, pct)
 
     @staticmethod
-    def _failure_type(result) -> str:
-        if result.passed:
-            return "none"
-        # Use failure_type if set, otherwise derive from error
-        if result.failure_type:
-            return result.failure_type
-        if result.error:
-            return str(result.error)
-        return "empty_output"
+    def _failure_type(result):
+        return agg.failure_type_of(result)
 
-    def _failure_breakdown(self, results: List) -> Dict[str, int]:
-        breakdown: Dict[str, int] = {}
-        for r in results:
-            if r.passed:
-                continue
-            failure_type = self._failure_type(r)
-            breakdown[failure_type] = breakdown.get(failure_type, 0) + 1
-        return dict(sorted(breakdown.items(), key=lambda x: x[1], reverse=True))
+    def _failure_breakdown(self, results):
+        return agg.failure_breakdown(results)
 
-    def _top_failures(self, results: List) -> List[Tuple[str, str, int, str]]:
-        counts: Dict[Tuple[str, str], int] = {}
-        severity_map: Dict[Tuple[str, str], str] = {}
-        for r in results:
-            if r.passed:
-                continue
-            failure_type = self._failure_type(r)
-            severity = (r.metrics or {}).get('severity', 'S2')
-            key = (r.case_id, failure_type)
-            counts[key] = counts.get(key, 0) + 1
-            severity_map[key] = severity
-        
-        # Sort by severity (S1 first), then by count
-        sorted_items = sorted(
-            counts.items(),
-            key=lambda x: (
-                0 if severity_map.get(x[0]) == 'S1' else 1,  # S1 first
-                -x[1]  # Then by count descending
-            )
-        )[:10]
-        return [
-            (case_id, failure_type, count, self._suspected_cause(failure_type))
-            for (case_id, failure_type), count in sorted_items
-        ]
+    def _top_failures(self, results):
+        return agg.top_failures(results)
 
     @staticmethod
-    def _suspected_cause(failure_type: str) -> str:
-        mapping = {
-            "timeout": "インフラ/プロバイダ",
-            "bad_json": "prompt/schema",
-            "loop": "tool/routing",
-            "policy_violation": "安全設計",
-            "quality_fail": "prompt/エージェントロジック",
-            "provider_error": "インフラ/プロバイダ",
-            "rate_limited": "レート制限設定",
-            "empty_output": "モデル出力/プロンプト",
-        }
-        return mapping.get(failure_type, "要調査")
+    def _suspected_cause(failure_type):
+        return agg.suspected_cause(failure_type)
 
-    def _worst_regression(self, results: List, prev_results: List) -> Tuple[str, Optional[float]]:
-        if not prev_results:
-            return "N/A（先週データなし）", None
-
-        def _case_pass_rate(items: List) -> Dict[str, float]:
-            stats: Dict[str, List[bool]] = {}
-            for r in items:
-                stats.setdefault(r.case_id, []).append(r.passed)
-            return {k: (sum(v) / len(v) * 100) for k, v in stats.items() if v}
-
-        curr_rates = _case_pass_rate(results)
-        prev_rates = _case_pass_rate(prev_results)
-        deltas: List[Tuple[str, float]] = []
-        for case_id, curr_rate in curr_rates.items():
-            if case_id in prev_rates:
-                deltas.append((case_id, curr_rate - prev_rates[case_id]))
-        if not deltas:
-            return "N/A（比較対象なし）", None
-
-        case_id, delta = min(deltas, key=lambda x: x[1])
-        return f"{case_id}（先週比 {delta:+.2f}%）", delta
+    def _worst_regression(self, results, prev_results):
+        return analyze.worst_regression(results, prev_results)
 
     @staticmethod
-    def _overall_status(
-        overall_pass_rate: float,
-        s1_pass_rate: float,
-        s1_total: int,
-        s2_pass_rate: float,
-        s2_total: int,
-        worst_delta: Optional[float],
-    ) -> str:
-        s1_ok = (s1_pass_rate >= 98) if s1_total > 0 else True
-        s2_ok = (s2_pass_rate >= 98) if s2_total > 0 else True
-        if overall_pass_rate >= 98 and s1_ok and s2_ok and (worst_delta is None or worst_delta >= -1):
-            return "✅安定"
-        if overall_pass_rate < 95 or (s1_total > 0 and s1_pass_rate < 95) or (worst_delta is not None and worst_delta <= -5):
-            return "🔥重大"
-        return "⚠️注意"
+    def _overall_status(overall_pass_rate, s1_pass_rate, s1_total, s2_pass_rate, s2_total, worst_delta):
+        return analyze.overall_status(overall_pass_rate, s1_pass_rate, s1_total, s2_pass_rate, s2_total, worst_delta)
 
-    def _next_actions(self, failure_breakdown: Dict[str, int], worst_regression: Tuple[str, Optional[float]]) -> List[str]:
-        actions: List[str] = []
-        priority = [
-            ("timeout", "タイムアウト多発: インフラ/プロバイダの遅延調査"),
-            ("bad_json", "JSON不正: prompt/schema の調整"),
-            ("loop", "ループ発生: tool/routing の停止条件見直し"),
-            ("policy_violation", "ポリシー違反: 安全設計ルールの再確認"),
-            ("quality_fail", "品質低下: プロンプト/評価ロジック改善"),
-            ("provider_error", "プロバイダ障害: リトライ/フォールバック見直し"),
-        ]
-        for key, action in priority:
-            if key in failure_breakdown and action not in actions:
-                actions.append(action)
-        if worst_regression[1] is not None:
-            actions.append(f"最重要回帰: {worst_regression[0]} の原因調査")
-        while len(actions) < 3:
-            actions.append("回帰ケースの追加と閾値の再確認")
-        return actions[:3]
+    def _next_actions(self, fb, worst_reg):
+        return analyze.next_actions(fb, worst_reg)
+
+    @staticmethod
+    def _compute_case_pass_rates(results):
+        return agg.compute_case_pass_rates(results)
+
+    @staticmethod
+    def _compute_pass_rate_delta(current_results, baseline_results, severity=None):
+        return analyze.compute_pass_rate_delta(current_results, baseline_results, severity)
+
+    @staticmethod
+    def _compute_failure_type_delta(current_results, baseline_results):
+        return analyze.compute_failure_type_delta(current_results, baseline_results)
+
+    @staticmethod
+    def _compute_top_regressions(current_results, baseline_results, top_n=5):
+        return analyze.compute_top_regressions(current_results, baseline_results, top_n)
     
     def save_report(self, report_content: str, filename: Optional[str] = None) -> Path:
         """

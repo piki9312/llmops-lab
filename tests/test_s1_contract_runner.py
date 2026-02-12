@@ -5,8 +5,8 @@ Tests for S1 JSON contract evaluation in agentops runner.
 import pytest
 import json
 from datetime import datetime
-from src.agentops.runner import RegressionRunner
-from src.agentops.models import TestCase
+from agentops.runner import RegressionRunner
+from agentops.models import TestCase
 
 
 class TestS1ContractValidation:

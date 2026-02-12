@@ -1,17 +1,25 @@
 # 🚀 LLMOps Lab
 
-**本番環境対応の LLM Gateway と可観測性プラットフォーム**
+**回帰テスト×運用に特化した Dev 向け CI プロダクト（LLM/Agent 品質劣化の自動検知）**
 
-[![Tests](https://img.shields.io/badge/tests-99%20passed-success)](tests/)
+[![Tests](https://img.shields.io/badge/tests-124%20passed-success)](tests/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](Dockerfile)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-LLMOps Lab は、大規模言語モデル（LLM）の運用に必要な機能を統合した、本番環境対応のゲートウェイプラットフォームです。FastAPI ベースの API、リアルタイム可視化、レート制限、キャッシング、コスト追跡など、エンタープライズグレードの機能を提供します。
+LLMOps Lab は、LLM/Agent の変更（prompt / tool / model / provider / code）による **品質劣化を CI 上で検知**し、どこが悪化したかを自動で要約するための実験・実装リポジトリです。
+
+中心は **Agent Regression（AgentReg）** で、JSONL 永続化・週次/期間比較・Top 回帰ケース抽出までを備えています。LLM Gateway（FastAPI）や可観測性（Streamlit）は補助コンポーネントとして同梱しています。
 
 ---
 
 ## ✨ 主要機能
+
+### ✅ Agent Regression（CI 向け）
+- **回帰テスト実行** - CSV でケース管理、毎回同一入力で検証
+- **JSONL 永続化** - 1ケース=1行で保存（`runs/agentreg/YYYYMMDD.jsonl`）
+- **期間比較（ベースライン）** - 成功率デルタ、失敗タイプ増減、Top 回帰ケース
+- **Markdown レポート** - 週次レポート生成（CI で artifact / PR コメント化しやすい）
 
 ### 🎯 コア機能
 - **FastAPI Gateway** - RESTful API で LLM プロバイダーを統一
@@ -34,7 +42,7 @@ LLMOps Lab は、大規模言語モデル（LLM）の運用に必要な機能を
 - **環境変数設定** - 11 個の環境変数で柔軟な設定
 - **Docker 化** - docker-compose で API + Dashboard を 1 コマンド起動
 - **ヘルスチェック** - 自動的なコンテナ監視
-- **CI/CD** - GitHub Actions（Python 3.10/3.11 マトリックス）
+- **CI/CD** - GitHub Actions（6 つのワークフロー、Python 3.10/3.11/3.12 対応）
 
 ---
 
@@ -46,13 +54,19 @@ LLMOps Lab は、大規模言語モデル（LLM）の運用に必要な機能を
 # 1. セットアップ
 pip install -e ".[dev]"
 
-# 2. API 起動
+# 2. 回帰テスト（AgentReg）
+python -m agentops run-daily cases/agent_regression.csv --log-dir runs/agentreg -v
+
+# 3. ベースライン比較レポート（直近7日 vs その前7日）
+python -m agentops report --log-dir runs/agentreg --days 7 --baseline-days 7 -o reports/weekly_regression_report.md -v
+
+# 4. API 起動（Gateway: 任意）
 python -m uvicorn src.llmops.gateway:app --host 127.0.0.1 --port 8000
 
-# 3. ダッシュボード起動（別ターミナル）
+# 5. ダッシュボード起動（別ターミナル / 任意）
 streamlit run src/llmops/dashboard.py
 
-# 4. テスト実行
+# 6. テスト実行
 make test
 ```
 
@@ -206,13 +220,15 @@ pytest tests/test_config.py -v
 pytest --cov=src/llmops tests/
 ```
 
-**テストカバレッジ**: 99 テスト、100% 合格
+**テスト**: 124 テスト、100% 合格
 
 ---
 
 ## 📚 ドキュメント
 
 - **[開発者ガイド](docs/README_DEV.md)** - セットアップ、開発フロー、Docker デプロイ
+- **[CI の使い方（AgentReg）](docs/CI.md)** - PR/日次実行、artifacts の見方、S1ゲート
+- **[AgentReg（CIプロダクト方針）](docs/AGENTREG_CI_PRODUCT.md)** - 回帰テスト×運用の設計方針
 - **[エージェントルール](docs/AGENT_RULES.md)** - 自動化エージェント実行ルール
 - **[API ドキュメント](http://localhost:8000/docs)** - OpenAPI（Swagger UI）
 
@@ -220,12 +236,23 @@ pytest --cov=src/llmops tests/
 
 ## 🔄 CI/CD
 
-GitHub Actions で自動テスト・評価：
+GitHub Actions で自動テスト・評価・デプロイ：
 
-- **トリガー**: push（main/dev/feature/fix）、PR（main/dev）
-- **マトリックス**: Python 3.10, 3.11
-- **実行内容**: pytest、評価スクリプト、pylint、ログ確認
-- **アーティファクト**: 評価レポート（30 日間保存）
+**ワークフロー:**
+- **CI/CD Pipeline** - Lint → Test → Build → Security（毎 push/PR）
+- **PR Checks** - 形式検証、変更分析、自動コメント
+- **Nightly Tests** - 日次テスト実行（全 Python バージョン）
+- **Weekly Regression Report** - 毎週月曜に回帰分析レポート生成
+- **Dependency Updates** - 毎週日曜に依存パッケージをチェック
+- **Release** - タグプッシュで自動リリース＆PyPI デプロイ
+
+**詳細:** [GitHub Actions ドキュメント](docs/GITHUB_ACTIONS.md)
+
+**ステータス:**
+- テスト: Python 3.10, 3.11, 3.12 マトリックス
+- キャッシュ: pip キャッシュで高速化
+- レポート: codecov への自動アップロード
+- Docker: main/dev ブランチで自動ビルド
 
 ---
 
@@ -303,8 +330,46 @@ docker-compose down -v
 # テスト実行
 python -m agentops.cli cases/agent_regression.csv -v
 
+# 週次レポート生成（当週vs前週比較）
+python -m agentops report --days 14 --baseline-days 14 -o reports/regression_report.md --verbose
+
 # レポート確認
 ls reports/agentreg/
+cat reports/regression_report.md
+```
+
+### 回帰分析レポート機能
+
+**新機能**: Week-over-Week 比較による回帰検出
+
+```bash
+# 基本的な使用方法
+python -m agentops report --days 7
+
+# ベースライン期間を指定して実行
+python -m agentops report --days 14 --baseline-days 14 -o reports/weekly_report.md
+
+# 詳細ログ出力
+python -m agentops report --days 7 --verbose
+```
+
+**レポートに含まれる情報:**
+- 📈 Week-over-Week Summary - 全体/S1/S2 成功率の変化
+- 📊 失敗タイプの変化 - failure_type ごとの増減数
+- 🔴 トップ回帰ケース - 最悪化した 5 つのテストケース（S1 優先）
+- 📋 Individual Runs - 各実行の詳細メトリクス
+
+**レポート例:**
+```
+## Week-over-Week Summary
+- 全体成功率: 62.50% (前週: 100.00%) → **-37.50%**
+- S1成功率: 25.00% (前週: 100.00%) → **-75.00%**
+- S2成功率: 100.00% (前週: 100.00%) → **+0.00%**
+
+## トップ回帰ケース（前週比で最も悪化）
+| ケース | 重要度 | カテゴリ | 前週 | 今週 | 変化 | 主な失敗 |
+|--------|--------|---------|------|------|------|---------|
+| TC004 | S1 | api | 100.0% | 25.0% | **-75.0%** | quality_fail |
 ```
 
 ### ドキュメント

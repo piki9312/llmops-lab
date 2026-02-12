@@ -1,0 +1,89 @@
+name: Dependency Updates
+
+on:
+  schedule:
+    - cron: '0 3 * * 0'  # Every Sunday at 3 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-dependencies:
+    name: Check Dependency Updates
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install current dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      
+      - name: Check for outdated packages
+        run: |
+          pip list --outdated | tee outdated.txt || echo "All packages are up to date"
+      
+      - name: Generate dependency report
+        run: |
+          echo "# Dependency Status Report" > dependency_report.md
+          echo "" >> dependency_report.md
+          echo "## Installed Packages" >> dependency_report.md
+          echo "\`\`\`" >> dependency_report.md
+          pip list >> dependency_report.md
+          echo "\`\`\`" >> dependency_report.md
+          echo "" >> dependency_report.md
+          echo "## Outdated Packages" >> dependency_report.md
+          if [ -s outdated.txt ]; then
+            echo "\`\`\`" >> dependency_report.md
+            cat outdated.txt >> dependency_report.md
+            echo "\`\`\`" >> dependency_report.md
+          else
+            echo "All packages are current!" >> dependency_report.md
+          fi
+      
+      - name: Upload dependency report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-report
+          path: dependency_report.md
+          retention-days: 90
+      
+      - name: Check for security vulnerabilities
+        run: |
+          python -m pip install safety
+          python -m safety check --json > safety-report.json || echo "Vulnerabilities found"
+      
+      - name: Upload security report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-report
+          path: safety-report.json
+          retention-days: 90
+      
+      - name: Comment on findings
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const outdated = fs.readFileSync('outdated.txt', 'utf8');
+            const hasOutdated = outdated && outdated.trim().length > 0;
+            
+            let status = hasOutdated ? '⚠️' : '✅';
+            let message = `${status} **Dependency Report**\n\n`;
+            message += hasOutdated 
+              ? '⚠️ Found outdated packages. Consider updating dependencies.' 
+              : '✅ All dependencies are up to date.';
+            
+            console.log(message);

@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.llmops.pricing import calculate_cost_usd, format_cost_usd, OPENAI_PRICING
+from llmops.pricing import calculate_cost_usd, format_cost_usd, OPENAI_PRICING
 
 
 class TestCalculateCostUSD:

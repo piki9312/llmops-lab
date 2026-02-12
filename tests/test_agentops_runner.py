@@ -3,8 +3,8 @@ Tests for agentops.runner module.
 """
 
 import pytest
-from src.agentops.runner import RegressionRunner
-from src.agentops.models import TestCase
+from agentops.runner import RegressionRunner
+from agentops.models import TestCase
 
 
 def test_runner_creation():

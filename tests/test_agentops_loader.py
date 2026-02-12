@@ -5,7 +5,7 @@ Tests for agentops.load_cases module.
 import pytest
 from pathlib import Path
 
-from src.agentops.load_cases import load_from_csv
+from agentops.load_cases import load_from_csv
 
 
 def test_load_from_csv():

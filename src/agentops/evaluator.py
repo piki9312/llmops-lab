@@ -7,6 +7,7 @@ including operational metrics from llmops (cost, latency, cache hit rate).
 
 from typing import List, Dict, Any
 from .models import TestResult, RegressionReport
+from .aggregate import severity_pass_rate, format_rate
 
 
 class Evaluator:
@@ -162,6 +163,10 @@ class Evaluator:
         evaluator = Evaluator()
         cost_efficiency = evaluator.calculate_cost_efficiency(report.results)
         
+        # S1 / S2 pass-rate breakdown
+        s1_stats = severity_pass_rate(report.results, "S1")
+        s2_stats = severity_pass_rate(report.results, "S2")
+
         return {
             # Test execution metrics
             "run_id": report.run_id,
@@ -174,6 +179,16 @@ class Evaluator:
             "accuracy": evaluator.calculate_accuracy(report.results),
             "avg_execution_time_seconds": evaluator.calculate_average_execution_time(report.results),
             
+            # S1 / S2 breakdown
+            "s1_rate_percent": s1_stats[0],
+            "s1_passed": s1_stats[1],
+            "s1_total": s1_stats[2],
+            "pass_rate_s1": format_rate(s1_stats),
+            "s2_rate_percent": s2_stats[0],
+            "s2_passed": s2_stats[1],
+            "s2_total": s2_stats[2],
+            "pass_rate_s2": format_rate(s2_stats),
+
             # llmops operational metrics
             "total_cost_usd": evaluator.calculate_total_cost(report.results),
             "avg_cost_per_test_usd": evaluator.calculate_average_cost_per_test(report.results),

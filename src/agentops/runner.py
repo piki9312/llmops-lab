@@ -5,6 +5,7 @@ This module executes test cases via llmops gateway to collect both
 functional results and operational metrics (cost, latency, cache hit, etc).
 """
 
+import os
 import time
 from datetime import datetime
 from typing import List, Optional
@@ -14,6 +15,47 @@ import json
 
 from .models import TestCase, TestResult, RegressionReport
 from .json_validator import JSONContractValidator
+
+
+def _default_llmops_config() -> dict:
+    """Build default llmops config from environment variables."""
+    provider = os.getenv("LLM_PROVIDER", "mock")
+    model = os.getenv("LLM_MODEL", "gpt-4o-mini" if provider == "openai" else "gpt-4-mock")
+    return {
+        "provider": provider,
+        "model": model,
+        "timeout_seconds": int(os.getenv("LLM_TIMEOUT", "30")),
+        "max_retries": int(os.getenv("LLM_MAX_RETRIES", "2")),
+    }
+
+
+def _soft_match(actual: str, expected: str) -> bool:
+    """Lightweight semantic match for S2 cases.
+
+    Returns True when the actual output *reasonably* addresses the
+    expected answer.  Heuristic: extract meaningful keywords from
+    ``expected`` and check that at least 50 % appear in ``actual``
+    (case-insensitive).  Single-word expected values require an exact
+    substring match.
+    """
+    if not expected or not actual:
+        return bool(actual)
+
+    actual_lower = actual.lower()
+    expected_lower = expected.lower()
+
+    # Strip common noise phrases
+    for noise in ("a ", "an ", "the ", "or equivalent"):
+        expected_lower = expected_lower.replace(noise, " ")
+
+    # Tokenise into keywords (len >= 2)
+    keywords = [w for w in expected_lower.split() if len(w) >= 2]
+    if not keywords:
+        return True  # nothing to check
+
+    hits = sum(1 for kw in keywords if kw in actual_lower)
+    ratio = hits / len(keywords)
+    return ratio >= 0.5
 
 
 class RegressionRunner:
@@ -28,10 +70,7 @@ class RegressionRunner:
             llmops_config: Configuration for llmops (provider, model, etc)
         """
         self.use_llmops = use_llmops
-        self.llmops_config = llmops_config or {
-            "provider": "mock",
-            "model": "gpt-4-mock",
-        }
+        self.llmops_config = llmops_config or _default_llmops_config()
         self.results: List[TestResult] = []
         self.llm_client = None
         
@@ -103,19 +142,20 @@ class RegressionRunner:
         try:
             if self.use_llmops and self.llm_client:
                 # Execute via llmops synchronously
-                llmops_result = self._run_async(self._call_llmops(case.input_prompt, severity))
+                llmops_result = self._run_async(
+                    self._call_llmops(case.input_prompt, severity,
+                                      expected_output=case.expected_output)
+                )
                 actual_output = llmops_result.get("text", "")
                 error = llmops_result.get("error")
                 
-                # For S1 cases, ensure JSON output for contract validation
+                # --- S1: JSON contract validation ---
                 if severity == "S1" and not error:
                     try:
-                        # Validate output is valid JSON
                         json.loads(actual_output)
                     except (json.JSONDecodeError, ValueError):
                         error = "Output is not valid JSON"
-                        failure_type = "bad_json"                    
-                    # Validate JSON contract if expected_output is provided
+                        failure_type = "bad_json"
                     if not error and case.expected_output:
                         is_valid, fail_type, error_msg = JSONContractValidator.validate_contract(
                             case.expected_output,
@@ -123,7 +163,14 @@ class RegressionRunner:
                         )
                         if not is_valid:
                             error = error_msg
-                            failure_type = fail_type                
+                            failure_type = fail_type
+
+                # --- S2: lightweight semantic check ---
+                if severity != "S1" and not error and case.expected_output:
+                    if not _soft_match(actual_output, case.expected_output):
+                        error = f"Output does not match expected: {case.expected_output[:80]}"
+                        failure_type = "quality_fail"
+
                 # Extract llmops metrics
                 latency_ms = llmops_result.get("latency_ms", 0.0)
                 prompt_tokens = llmops_result.get("prompt_tokens", 0)
@@ -171,48 +218,64 @@ class RegressionRunner:
         
         return result
     
-    async def _call_llmops(self, prompt: str, severity: str = "S2") -> dict:
-        """
-        Call llmops gateway to execute prompt.
-        
-        Args:
-            prompt: Input prompt
-            
-        Returns:
-            Dict with output and metrics
+    async def _call_llmops(self, prompt: str, severity: str = "S2",
+                           expected_output: Optional[str] = None) -> dict:
+        """Call llmops gateway to execute prompt.
+
+        For S1 cases the LLM is asked to reply in JSON that conforms to the
+        expected contract schema.  Latency is measured around the actual API
+        call so the metric reflects real-world performance.
         """
         from llmops.pricing import calculate_cost_usd
-        
+
+        # --- Build request --------------------------------------------------
+        messages: list[dict] = []
+        schema = None
+
+        if severity == "S1" and expected_output:
+            # Ask the model to respond with JSON matching the expected schema
+            try:
+                expected_json = json.loads(expected_output)
+                schema = {
+                    "type": "object",
+                    "properties": {k: {"type": type(v).__name__} for k, v in expected_json.items()},
+                }
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "You are an API backend. Respond ONLY with a valid JSON "
+                        "object. Do not include any explanation or markdown.\n"
+                        f"Required keys and example values: {expected_output}"
+                    ),
+                })
+            except (json.JSONDecodeError, ValueError):
+                pass  # fall through to plain-text mode
+
+        messages.append({"role": "user", "content": prompt})
+
+        # --- Execute with latency measurement --------------------------------
+        t0 = time.perf_counter()
         result = await self.llm_client.generate(
-            messages=[{"role": "user", "content": prompt}],
-            schema=None,
-            max_tokens=256,
+            messages=messages,
+            schema=schema,
+            max_tokens=512 if severity == "S1" else 256,
         )
-        
+        latency_ms = (time.perf_counter() - t0) * 1000
+
+        # --- Extract metrics -------------------------------------------------
         tokens = result.get("tokens", {"prompt": 0, "completion": 0, "total": 0})
+        model = self.llmops_config.get("model", "gpt-4-mock")
+        provider = self.llmops_config.get("provider", "mock")
+
         cost_usd = calculate_cost_usd(
-            model=self.llmops_config.get("model", "gpt-4-mock"),
+            model=model,
             prompt_tokens=tokens.get("prompt", 0),
             completion_tokens=tokens.get("completion", 0),
-            provider=self.llmops_config.get("provider", "mock"),
+            provider=provider,
         )
-        
+
         output_text = result.get("text", "")
-        
-        # For S1 cases, generate deterministic JSON output for testing
-        if severity == "S1" and not result.get("error_type"):
-            # Mock provider generates JSON-like output for S1
-            try:
-                # Check if output is already JSON
-                json.loads(output_text)
-            except (json.JSONDecodeError, ValueError):
-                # Generate mock JSON for deterministic testing
-                output_text = json.dumps({
-                    "status": "success",
-                    "data": output_text[:50] if output_text else "mock_data",
-                    "timestamp": "2026-02-01T10:00:00Z"
-                })
-        
+
         return {
             "text": output_text,
             "error": result.get("error_type"),
@@ -220,8 +283,8 @@ class RegressionRunner:
             "completion_tokens": tokens.get("completion", 0),
             "total_tokens": tokens.get("total", 0),
             "cost_usd": cost_usd,
-            "cache_hit": False,  # Would be populated by actual llmops call
-            "latency_ms": 0.0,  # Would be populated by actual llmops call
+            "cache_hit": False,
+            "latency_ms": latency_ms,
         }
     
     def run_all(self, cases: List[TestCase], run_id: Optional[str] = None) -> RegressionReport:
